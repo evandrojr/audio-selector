@@ -1,10 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::time::{Duration, Instant};
-use std::sync::Mutex;
 use crate::utils::get_config_path;
-
-static LAST_SAVE: Mutex<Option<Instant>> = Mutex::new(None);
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 #[serde(default)]
@@ -40,15 +36,6 @@ pub fn load_config() -> Config {
 }
 
 pub fn save_config(config: &Config) {
-    {
-        let mut last = LAST_SAVE.lock().unwrap();
-        if let Some(t) = *last {
-            if t.elapsed() < Duration::from_millis(300) {
-                return;
-            }
-        }
-        *last = Some(Instant::now());
-    }
     if let Ok(c) = serde_json::to_string_pretty(config) {
         let _ = fs::write(get_config_path(), c);
     }

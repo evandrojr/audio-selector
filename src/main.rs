@@ -13,7 +13,6 @@ use std::rc::Rc;
 use std::fs;
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::path::PathBuf;
 use tray_icon::{
     menu::{Menu, MenuItem},
     TrayIconBuilder,
