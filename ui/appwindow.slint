@@ -53,6 +53,11 @@ export component AppWindow inherits Window {
     in-out property <bool> hide_unknown_bt: false;
     in-out property <int> sink_volume: 50;
 
+    in-out property <bool> show_logs: false;
+    in-out property <string> log_text: "";
+    in-out property <string> log_search: "";
+    callback refresh_logs();
+
     VerticalBox {
         spacing: 15px;
         padding: 10px;
@@ -189,6 +194,49 @@ export component AppWindow inherits Window {
                                                 toggle_device_exclusion(dev.name, self.checked);
                                             }
                                         }
+                                    }
+                                }
+                            }
+                        }
+
+                        HorizontalBox {
+                            alignment: space-between;
+                            Text { text: "Show Application Logs"; vertical-alignment: center; font-weight: 700; }
+                            Switch {
+                                checked: show_logs;
+                                toggled => {
+                                    show_logs = !show_logs;
+                                    if (show_logs) { refresh_logs(); }
+                                }
+                            }
+                        }
+
+                        if show_logs : VerticalBox {
+                            spacing: 10px;
+                            HorizontalBox {
+                                spacing: 10px;
+                                Text { text: "Search Logs:"; vertical-alignment: center; font-size: 12px; }
+                                TextInput {
+                                    text: log_search;
+                                    edited => {
+                                        log_search = self.text;
+                                        refresh_logs();
+                                    }
+                                }
+                            }
+                            Rectangle {
+                                border-radius: 4px;
+                                border-color: #ddd;
+                                border-width: 1px;
+                                background: #fafafa;
+                                min-height: 150px;
+                                ScrollView {
+                                    Text {
+                                        padding: 5px;
+                                        text: log_text;
+                                        wrap: word-wrap;
+                                        font-size: 11px;
+                                        font-family: "monospace";
                                     }
                                 }
                             }

@@ -11,7 +11,19 @@ use std::thread;
 use sys_locale::get_locale;
 use std::path::PathBuf;
 
+use tray_icon::{
+    menu::{Menu, MenuEvent, MenuItem},
+    TrayIconBuilder, Icon,
+};
+
 const CONFIG_FILE: &str = "config.json";
+
+fn load_tray_icon() -> Icon {
+    let image = image::open("ui/assets/icon.png").expect("Failed to open icon path");
+    let image = image::imageops::resize(&image, 64, 64, image::imageops::FilterType::Lanczos3);
+    let (width, height) = image.dimensions();
+    Icon::from_rgba(image.into_raw(), width, height).expect("Failed to open icon")
+}
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 #[serde(default)]
@@ -381,35 +393,63 @@ fn install_app() -> anyhow::Result<()> {
     Ok(())
 }
 
+use std::io::Read;
+
+fn get_log_content(search: &str) -> String {
+    let log_path = dirs::home_dir().unwrap_or_default().join("audio-selector-debug.log");
+    if let Ok(mut file) = std::fs::File::open(&log_path) {
+        let mut contents = String::new();
+        if file.read_to_string(&mut contents).is_ok() {
+            if search.is_empty() {
+                // Return last 200 lines to prevent massive UI slowdowns
+                let lines: Vec<&str> = contents.lines().rev().take(200).collect();
+                return lines.into_iter().rev().collect::<Vec<&str>>().join("\n");
+            } else {
+                let search_lower = search.to_lowercase();
+                let filtered: Vec<&str> = contents.lines()
+                    .filter(|l| l.to_lowercase().contains(&search_lower))
+                    .rev().take(200).collect();
+                return filtered.into_iter().rev().collect::<Vec<&str>>().join("\n");
+            }
+        }
+    }
+    "No logs found.".to_string()
+}
+
 fn append_log(msg: &str) {
     use std::io::Write;
     let log_path = dirs::home_dir().unwrap_or_default().join("audio-selector-debug.log");
     if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(&log_path) {
         let _ = file.write_all(msg.as_bytes());
+        let _ = file.write_all(b"\n");
     }
 }
 
 fn main() -> anyhow::Result<()> {
     let _ = fs::write(dirs::home_dir().unwrap_or_default().join("audio-selector-debug.log"), ""); // clear log
-    append_log("Starting Audio Selector...\n");
+    append_log("Starting Audio Selector...");
 
     if std::env::args().any(|x| x == "-install") { 
-        append_log("Running installer...\n");
+        append_log("Running installer...");
         return install_app(); 
     }
     
-    append_log("Loading config...\n");
+    append_log("Loading config...");
     let config_data = load_config();
     
-    append_log("Building UI...\n");
+    append_log("Building UI...");
     let ui = AppWindow::new()?;
     
-    append_log("Applying geometry...\n");
+    append_log("Applying geometry...");
     if let (Some(w), Some(h)) = (config_data.window_width, config_data.window_height) { ui.window().set_size(slint::PhysicalSize::new(w as u32, h as u32)); }
     if let (Some(x), Some(y)) = (config_data.window_x, config_data.window_y) { ui.window().set_position(slint::PhysicalPosition::new(x, y)); }
+    
+    append_log("Initializing locale...");
     let ui_weak = ui.as_weak();
     let ui_handle = Arc::new(Mutex::new(ui_weak.clone()));
     let locale = get_locale().unwrap_or_else(|| "en".to_string());
+    
+    append_log(&format!("Locale found: {}. Setting strings...", locale));
     let t_static = if locale.starts_with("pt") { &PT } else if locale.starts_with("es") { &ES } else if locale.starts_with("fr") { &FR } else if locale.starts_with("de") { &DE } else if locale.starts_with("it") { &IT } else { &EN };
     
     ui.set_l_title(t_static.title.into()); 
@@ -429,6 +469,7 @@ fn main() -> anyhow::Result<()> {
     #[cfg(target_os = "linux")] ui.set_status(t_static.status_ready.into());
     #[cfg(not(target_os = "linux"))] ui.set_status(t_static.status_unsupported.into());
     
+    append_log("Initializing config lock...");
     let config = Arc::new(Mutex::new(config_data));
     {
         let c = config.lock().unwrap();
@@ -437,7 +478,18 @@ fn main() -> anyhow::Result<()> {
         ui.set_filter_enabled(c.filter_enabled); 
         ui.set_hide_unknown_bt(c.hide_unknown_bt);
     }
+    
+    append_log("Checking initial bluetooth state...");
     if ui.get_bluetooth_enabled() { let _ = set_bluetooth_power(true); }
+
+    append_log("Setting up callbacks...");
+    let ui_log_weak = ui_weak.clone();
+    ui.on_refresh_logs(move || {
+        let ui = ui_log_weak.unwrap();
+        let search = ui.get_log_search().to_string();
+        let logs = get_log_content(&search);
+        ui.set_log_text(logs.into());
+    });
 
     let sinks_cache = Arc::new(Mutex::new(Vec::<PactlDevice>::new()));
     let sources_cache = Arc::new(Mutex::new(Vec::<PactlDevice>::new()));
