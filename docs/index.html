@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Audio Selector</title>
+  <meta name="description" content="A modern, fast, and lightweight audio device switcher written in Rust with a Slint GUI.">
+  <link rel="icon" href="assets/icon.png">
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+
+<header>
+  <div class="container">
+    <img src="assets/icon.png" alt="Audio Selector" class="icon">
+    <h1>Audio Selector</h1>
+    <p class="subtitle">
+      A modern, fast, and lightweight audio device switcher for Linux.
+      Switch between audio sinks and sources instantly with a clean GUI.
+    </p>
+    <div>
+      <span class="badge">Rust</span>
+      <span class="badge">Slint GUI</span>
+      <span class="badge"><a href="https://github.com/evandrojr/audio-selector">GitHub</a></span>
+      <span class="badge">MIT License</span>
+    </div>
+    <div class="hero-buttons">
+      <a href="https://github.com/evandrojr/audio-selector/releases" class="btn btn-primary">Download</a>
+      <a href="https://github.com/evandrojr/audio-selector" class="btn btn-secondary">View on GitHub</a>
+    </div>
+  </div>
+</header>
+
+<section id="features">
+  <div class="container">
+    <h2>Features</h2>
+    <p class="section-desc">Everything you need to manage your audio devices efficiently.</p>
+    <div class="features-grid">
+      <div class="feature-card">
+        <div class="icon-box" style="background:#e6fdf6;color:#0a192f;">⚡</div>
+        <h3>Instant Switching</h3>
+        <p>No "Apply" button needed. Selecting a device immediately changes the default and moves active audio streams.</p>
+      </div>
+      <div class="feature-card">
+        <div class="icon-box" style="background:#e8f4fd;color:#0c5460;">🔵</div>
+        <h3>Bluetooth Integration</h3>
+        <p>List paired devices, toggle Bluetooth power, and auto-connect on selection via <code>bluetoothctl</code>.</p>
+      </div>
+      <div class="feature-card">
+        <div class="icon-box" style="background:#fef3e2;color:#856404;">🔄</div>
+        <h3>Unified Mode</h3>
+        <p>Use the same device for both input and output with a single toggle.</p>
+      </div>
+      <div class="feature-card">
+        <div class="icon-box" style="background:#f0e6ff;color:#5a2d82;">💾</div>
+        <h3>Persistent Config</h3>
+        <p>Remembers last devices, window position, Bluetooth state, and exclusion list across sessions.</p>
+      </div>
+      <div class="feature-card">
+        <div class="icon-box" style="background:#fde8e8;color:#9b1c1c;">🌐</div>
+        <h3>Multi-language</h3>
+        <p>Auto-detects system locale. Supports English, Portuguese, Spanish, French, German, and Italian.</p>
+      </div>
+      <div class="feature-card">
+        <div class="icon-box" style="background:#e6fdf6;color:#0a192f;">🔍</div>
+        <h3>Device Filtering</h3>
+        <p>Exclude unwanted devices, hide unknown Bluetooth MAC addresses, and search debug logs.</p>
+      </div>
+      <div class="feature-card">
+        <div class="icon-box" style="background:#e8f4fd;color:#0c5460;">📦</div>
+        <h3>Device Caching</h3>
+        <p>Shows cached devices immediately on startup while a background scan refreshes the list in real time.</p>
+      </div>
+      <div class="feature-card">
+        <div class="icon-box" style="background:#fef3e2;color:#856404;">🖥️</div>
+        <h3>System Tray</h3>
+        <p>GTK-based tray icon with Quit and click-to-restore. Close button hides to tray instead of exiting.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="install">
+  <div class="container">
+    <h2>Installation</h2>
+    <p class="section-desc">Get up and running in minutes.</p>
+    <div class="install-steps">
+      <div class="install-step">
+        <div class="num">1</div>
+        <div class="content">
+          <h4>Download a release</h4>
+          <p>Grab the latest binary from the <a href="https://github.com/evandrojr/audio-selector/releases">Releases page</a> for your platform.</p>
+        </div>
+      </div>
+      <div class="install-step">
+        <div class="num">2</div>
+        <div class="content">
+          <h4>Install system-wide (optional)</h4>
+          <p>Run with the <code>-install</code> flag to copy the binary, install the icon, and set up autostart:</p>
+          <pre>./audio-selector -install</pre>
+        </div>
+      </div>
+      <div class="install-step">
+        <div class="num">3</div>
+        <div class="content">
+          <h4>Build from source</h4>
+          <p>Requires <a href="https://rustup.rs/">Rust</a> 1.80+:</p>
+          <pre>git clone https://github.com/evandrojr/audio-selector.git
+cd audio-selector
+cargo run --release</pre>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="tech">
+  <div class="container">
+    <h2>Tech Stack</h2>
+    <p class="section-desc">Built with modern tools for performance and reliability.</p>
+    <div class="tech-list">
+      <span class="tech-tag hl">Rust 1.80+</span>
+      <span class="tech-tag hl">Slint 1.8</span>
+      <span class="tech-tag">PulseAudio / PipeWire</span>
+      <span class="tech-tag">bluetoothctl</span>
+      <span class="tech-tag">pactl</span>
+      <span class="tech-tag">serde / serde_json</span>
+      <span class="tech-tag">GTK (tray-icon)</span>
+      <span class="tech-tag">GitHub Actions</span>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="container">
+    <p>
+      <a href="https://github.com/evandrojr/audio-selector">Audio Selector</a> &mdash; MIT License &mdash;
+      Created with ❤️
+    </p>
+  </div>
+</footer>
+
+</body>
+</html>

@@ -30,13 +30,13 @@ A modern, fast, and lightweight audio device switcher written in Rust with a Sli
 ## Installation
 
 ### From Binaries
-Download the latest version from the [Releases](https://github.com/youruser/audio-selector/releases) page.
+Download the latest version from the [Releases](https://github.com/evandrojr/audio-selector/releases) page.
 
 ### From Source
 Ensure you have [Rust](https://rustup.rs/) installed.
 
 ```bash
-git clone https://github.com/youruser/audio-selector.git
+git clone https://github.com/evandrojr/audio-selector.git
 cd audio-selector
 cargo run --release
 ```

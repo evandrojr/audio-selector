@@ -53,11 +53,19 @@ fn install_app() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn load_tray_icon() -> tray_icon::Icon {
-    let img = image::open("ui/assets/icon.png").expect("No icon");
-    let img = image::imageops::resize(&img, 64, 64, image::imageops::FilterType::Nearest);
-    let (w, h) = img.dimensions();
-    tray_icon::Icon::from_rgba(img.into_raw(), w, h).expect("Tray icon fail")
+fn load_tray_icon() -> Option<tray_icon::Icon> {
+    let img_bytes = include_bytes!("../ui/assets/icon.png");
+    match image::load_from_memory(img_bytes) {
+        Ok(img) => {
+            let img = image::imageops::resize(&img, 64, 64, image::imageops::FilterType::Nearest);
+            let (w, h) = img.dimensions();
+            match tray_icon::Icon::from_rgba(img.into_raw(), w, h) {
+                Ok(icon) => Some(icon),
+                Err(e) => { append_log(&format!("Tray icon conversion failed: {}", e)); None }
+            }
+        }
+        Err(e) => { append_log(&format!("Tray icon decode failed: {}", e)); None }
+    }
 }
 
 fn update_ui_models(ui: &AppWindow, sinks: &[PactlDevice], sources: &[PactlDevice], config: &Config) {
@@ -187,19 +195,26 @@ fn main() -> anyhow::Result<()> {
         let menu_quit_text = t.menu_quit.to_string();
         
         thread::spawn(move || {
-            if gtk::init().is_ok() {
-                let menu = Menu::new();
-                let q_i = MenuItem::new(&menu_quit_text, true, None);
-                let q_id = q_i.id().clone();
-                let _ = menu.append_items(&[&q_i]);
-                let icon_res = load_tray_icon();
-                
-                if let Ok(icon) = TrayIconBuilder::new()
-                    .with_menu(Box::new(menu))
-                    .with_tooltip(&tray_title)
-                    .with_icon(icon_res)
-                    .build() {
-                    
+            if let Err(e) = gtk::init() {
+                append_log(&format!("GTK init failed (tray icon unavailable): {}", e));
+                return;
+            }
+            let menu = Menu::new();
+            let q_i = MenuItem::new(&menu_quit_text, true, None);
+            let q_id = q_i.id().clone();
+            let _ = menu.append_items(&[&q_i]);
+            let icon_res = match load_tray_icon() {
+                Some(icon) => icon,
+                None => { append_log("Tray icon not loaded, skipping tray setup."); return; }
+            };
+            
+            match TrayIconBuilder::new()
+                .with_menu(Box::new(menu))
+                .with_tooltip(&tray_title)
+                .with_icon(icon_res)
+                .build() {
+                Ok(icon) => {
+                    append_log("Tray icon created successfully.");
                     let m_c = tray_icon::menu::MenuEvent::receiver();
                     thread::spawn(move || {
                         loop { if let Ok(e) = m_c.recv() { if e.id == q_id { std::process::exit(0); } } }
@@ -224,6 +239,7 @@ fn main() -> anyhow::Result<()> {
                         thread::sleep(std::time::Duration::from_millis(50));
                     }
                 }
+                Err(e) => append_log(&format!("Tray icon build failed: {}", e)),
             }
         });
     }
