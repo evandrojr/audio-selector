@@ -287,10 +287,13 @@ fn main() -> anyhow::Result<()> {
 
     let c_bt = Arc::clone(&cfg_arc);
     ui.on_toggle_bluetooth(move |on| {
-        let _ = set_bluetooth_power(on);
-        let mut c = c_bt.lock().unwrap();
-        c.bluetooth_enabled = on;
-        save_config(&c);
+        let c = c_bt.clone();
+        thread::spawn(move || {
+            let _ = set_bluetooth_power(on);
+            let mut cfg = c.lock().unwrap();
+            cfg.bluetooth_enabled = on;
+            save_config(&cfg);
+        });
     });
 
     let c_uni = Arc::clone(&cfg_arc);
@@ -418,11 +421,14 @@ fn main() -> anyhow::Result<()> {
         if let Some(u) = ui_v_ref.upgrade() {
             let idx = u.get_selected_sink_index();
             if idx >= 0 {
-                let s = s_vol.lock().unwrap();
-                if (idx as usize) < s.len() {
-                    let n = &s[idx as usize].name;
-                    if !n.starts_with("bluez_connect.") { let _ = set_sink_volume(n, v); }
-                }
+                let s = s_vol.clone();
+                thread::spawn(move || {
+                    let sinks = s.lock().unwrap();
+                    if (idx as usize) < sinks.len() {
+                        let n = &sinks[idx as usize].name;
+                        if !n.starts_with("bluez_connect.") { let _ = set_sink_volume(n, v); }
+                    }
+                });
             }
         }
     });
