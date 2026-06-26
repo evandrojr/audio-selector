@@ -10,7 +10,10 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use sys_locale::get_locale;
 use std::path::PathBuf;
-
+use tray_icon::{
+    menu::{Menu, MenuEvent, MenuItem},
+    TrayIconBuilder, Icon,
+};
 
 const CONFIG_FILE: &str = "config.json";
 
@@ -201,6 +204,12 @@ fn set_bluetooth_power(on: bool) -> anyhow::Result<()> {
 #[cfg(not(target_os = "linux"))]
 fn set_bluetooth_power(_: bool) -> anyhow::Result<()> { Ok(()) }
 
+fn load_tray_icon() -> Icon {
+    let img = image::open("ui/assets/icon.png").expect("No icon");
+    let img = image::imageops::resize(&img, 64, 64, image::imageops::FilterType::Lanczos3);
+    let (w, h) = img.dimensions(); Icon::from_rgba(img.into_raw(), w, h).expect("Tray icon fail")
+}
+
 fn load_config() -> Config {
     if let Ok(c) = fs::read_to_string(CONFIG_FILE) { if let Ok(cfg) = serde_json::from_str(&c) { return cfg; } }
     Config { unified_mode: true, ..Default::default() }
@@ -256,6 +265,17 @@ fn main() -> anyhow::Result<()> {
     let cfg = Arc::new(Mutex::new(config_data));
     { let c = cfg.lock().unwrap(); ui.set_unified_mode(c.unified_mode); ui.set_bluetooth_enabled(c.bluetooth_enabled); ui.set_filter_enabled(c.filter_enabled); ui.set_hide_unknown_bt(c.hide_unknown_bt); }
     if ui.get_bluetooth_enabled() { let _ = set_bluetooth_power(true); }
+
+    #[cfg(target_os = "linux")] { if gtk::init().is_ok() {
+        let menu = Menu::new(); let q_i = MenuItem::new(t.menu_quit, true, None); let q_id = q_i.id().clone(); let _ = menu.append_items(&[&q_i]);
+        if let Ok(tray_icon) = TrayIconBuilder::new().with_menu(Box::new(menu)).with_tooltip(t.title).with_icon(load_tray_icon()).build() {
+            thread::spawn(move || { let m_c = MenuEvent::receiver(); loop { if let Ok(e) = m_c.recv() { if e.id == q_id { std::process::exit(0); } } } });
+            let u_i = ui_w.clone(); thread::spawn(move || { let t_c = tray_icon::TrayIconEvent::receiver(); loop { if let Ok(e) = t_c.recv() { if let tray_icon::TrayIconEvent::Click { button: tray_icon::MouseButton::Left, .. } = e { let _ = slint::invoke_from_event_loop(move || { let win = u_i.unwrap().window(); win.show().unwrap(); }); } } } });
+            let _ = Box::leak(Box::new(tray_icon));
+            let gtk_t = slint::Timer::default(); gtk_t.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(50), move || { while gtk::events_pending() { gtk::main_iteration_do(false); } });
+            Box::leak(Box::new(gtk_t));
+        }
+    }}
 
     ui.window().on_close_requested(|| { slint::CloseRequestResponse::HideWindow });
 
