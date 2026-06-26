@@ -55,7 +55,7 @@ fn install_app() -> anyhow::Result<()> {
 
 fn load_tray_icon() -> tray_icon::Icon {
     let img = image::open("ui/assets/icon.png").expect("No icon");
-    let img = image::imageops::resize(&img, 64, 64, image::imageops::FilterType::Lanczos3);
+    let img = image::imageops::resize(&img, 64, 64, image::imageops::FilterType::Nearest); // Faster than Lanczos
     let (w, h) = img.dimensions();
     tray_icon::Icon::from_rgba(img.into_raw(), w, h).expect("Tray icon fail")
 }
@@ -118,14 +118,19 @@ fn update_ui_models(ui: &AppWindow, sinks: &[PactlDevice], sources: &[PactlDevic
 }
 
 fn main() -> anyhow::Result<()> {
-    append_log("Main started.");
+    let start_time = std::time::Instant::now();
+    append_log(">>> APP START");
+    
     let args: Vec<String> = std::env::args().collect();
     if args.iter().any(|x| x == "-install") { 
         return install_app(); 
     }
     let start_in_tray = args.iter().any(|x| x == "--tray");
     
+    append_log(&format!("Step 1: Config Load ({:?})", start_time.elapsed()));
     let config_data = load_config();
+    
+    append_log(&format!("Step 2: UI Creation ({:?})", start_time.elapsed()));
     let ui = AppWindow::new()?;
     let ui_weak = ui.as_weak();
     
@@ -136,6 +141,7 @@ fn main() -> anyhow::Result<()> {
         ui.window().set_position(slint::PhysicalPosition::new(x, y));
     }
     
+    append_log(&format!("Step 3: Translations ({:?})", start_time.elapsed()));
     let t = get_current_translations();
     ui.set_l_title(t.title.into());
     ui.set_l_tab_devices(t.tab_devices.into());
@@ -162,6 +168,7 @@ fn main() -> anyhow::Result<()> {
         ui.set_hide_unknown_bt(c.hide_unknown_bt);
         
         if !c.cached_sinks.is_empty() || !c.cached_sources.is_empty() {
+            append_log(&format!("Step 4: Load Cache ({:?})", start_time.elapsed()));
             let cached_sinks: Vec<PactlDevice> = c.cached_sinks.iter().map(|d| PactlDevice {
                 name: d.name.clone(),
                 description: d.description.clone(),
@@ -176,11 +183,9 @@ fn main() -> anyhow::Result<()> {
         }
     }
 
-    if ui.get_bluetooth_enabled() {
-        thread::spawn(|| { let _ = set_bluetooth_power(true); });
-    }
-
     #[cfg(target_os = "linux")] {
+        append_log(&format!("Step 5: GTK/Tray Init ({:?})", start_time.elapsed()));
+        // CRITICAL: GTK init MUST be on the main thread for reliability and speed
         if gtk::init().is_ok() {
             let menu = Menu::new();
             let q_i = MenuItem::new(t.menu_quit, true, None);
@@ -204,11 +209,11 @@ fn main() -> anyhow::Result<()> {
                     }
                 });
                 let _ = Box::leak(Box::new(icon));
-                let gtk_t = slint::Timer::default();
-                gtk_t.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(50), move || { 
+                let gtk_timer = slint::Timer::default();
+                gtk_timer.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(30), move || { 
                     while gtk::events_pending() { gtk::main_iteration_do(false); }
                 });
-                Box::leak(Box::new(gtk_t));
+                Box::leak(Box::new(gtk_timer));
             }
         }
     }
@@ -284,7 +289,7 @@ fn main() -> anyhow::Result<()> {
     };
     
     let r_init = refresh_fn.clone();
-    slint::Timer::single_shot(std::time::Duration::from_millis(100), move || { r_init(); });
+    slint::Timer::single_shot(std::time::Duration::from_millis(200), move || { r_init(); });
     ui.on_refresh(refresh_fn.clone());
 
     let c_bt = Arc::clone(&cfg_arc);
@@ -435,11 +440,9 @@ fn main() -> anyhow::Result<()> {
         }
     });
 
-    append_log("Starting Slint event loop...");
+    append_log(&format!("Step 6: Running event loop ({:?})", start_time.elapsed()));
     if !start_in_tray {
         ui.window().show().unwrap();
-    } else {
-        append_log("Started in tray mode.");
     }
     
     ui.run()?;
