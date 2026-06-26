@@ -15,10 +15,18 @@ use std::fs;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::path::PathBuf;
+#[cfg(target_os = "linux")]
 use tray_icon::{
     menu::{Menu, MenuItem},
     TrayIconBuilder,
 };
+#[cfg(target_os = "linux")]
+use rust_embed::RustEmbed;
+
+#[cfg(target_os = "linux")]
+#[derive(RustEmbed)]
+#[folder = "ui/assets/"]
+struct Assets;
 
 use crate::audio::{get_pactl_devices, apply_device_change, set_sink_volume, PactlDevice};
 use crate::bluetooth::{get_bluetooth_devices, set_bluetooth_power};
@@ -27,46 +35,50 @@ use crate::i18n::get_current_translations;
 use crate::utils::{append_log, get_log_content};
 
 fn install_app() -> anyhow::Result<()> {
+    append_log("Installing application...");
     let cur = std::env::current_exe()?;
-    let home = dirs::home_dir().context("No home")?;
+    let home = dirs::home_dir().context("No home directory found")?;
+
     let bin_dir = home.join(".local").join("bin");
     if !bin_dir.exists() { fs::create_dir_all(&bin_dir)?; }
     let target_bin = bin_dir.join("audio-selector");
+    append_log(&format!("Copying binary to {:?}", target_bin));
     fs::copy(&cur, &target_bin)?;
-    
+
     let icon_dir = home.join(".local").join("share").join("icons").join("hicolor").join("256x256").join("apps");
-    if !icon_dir.exists() { let _ = fs::create_dir_all(&icon_dir); }
+    if !icon_dir.exists() { fs::create_dir_all(&icon_dir)?; }
     let target_icon = icon_dir.join("audio-selector.png");
-    if PathBuf::from("ui/assets/icon.png").exists() { let _ = fs::copy("ui/assets/icon.png", &target_icon); }
-    
+
+    #[cfg(target_os = "linux")]
+    if let Some(icon_data) = Assets::get("icon.png") {
+        append_log(&format!("Exporting icon to {:?}", target_icon));
+        fs::write(&target_icon, icon_data.data)?;
+    }
+
     let desktop_base = format!(
         "[Desktop Entry]\nType=Application\nName=Audio Selector\nIcon={}\nTerminal=false\nCategories=AudioVideo;Audio;Utility;\nStartupNotify=true",
         target_icon.to_string_lossy()
     );
-    
+
     let app_dir = home.join(".local").join("share").join("applications");
     if !app_dir.exists() { fs::create_dir_all(&app_dir)?; }
     fs::write(app_dir.join("audio-selector.desktop"), format!("{}\nExec={}", desktop_base, target_bin.to_string_lossy()))?;
-    
+
     let autostart = home.join(".config").join("autostart");
     if !autostart.exists() { fs::create_dir_all(&autostart)?; }
     fs::write(autostart.join("audio-selector.desktop"), format!("{}\nExec={} --tray", desktop_base, target_bin.to_string_lossy()))?;
+
+    append_log("Installation successful.");
     Ok(())
 }
 
-fn load_tray_icon() -> Option<tray_icon::Icon> {
-    let img_bytes = include_bytes!("../ui/assets/icon.png");
-    match image::load_from_memory(img_bytes) {
-        Ok(img) => {
-            let img = image::imageops::resize(&img, 64, 64, image::imageops::FilterType::Nearest);
-            let (w, h) = img.dimensions();
-            match tray_icon::Icon::from_rgba(img.into_raw(), w, h) {
-                Ok(icon) => Some(icon),
-                Err(e) => { append_log(&format!("Tray icon conversion failed: {}", e)); None }
-            }
-        }
-        Err(e) => { append_log(&format!("Tray icon decode failed: {}", e)); None }
-    }
+#[cfg(target_os = "linux")]
+fn load_tray_icon() -> tray_icon::Icon {
+    let icon_data = Assets::get("icon.png").expect("Icon not found in embedded assets");
+    let img = image::load_from_memory(&icon_data.data).expect("Failed to decode icon");
+    let img = image::imageops::resize(&img, 64, 64, image::imageops::FilterType::Nearest);
+    let (w, h) = img.dimensions();
+    tray_icon::Icon::from_rgba(img.into_raw(), w, h).expect("Tray icon creation failed")
 }
 
 fn update_ui_models(ui: &AppWindow, sinks: &[PactlDevice], sources: &[PactlDevice], config: &Config) {
@@ -127,29 +139,38 @@ fn update_ui_models(ui: &AppWindow, sinks: &[PactlDevice], sources: &[PactlDevic
 }
 
 fn main() -> anyhow::Result<()> {
-    append_log(">>> APP START");
+    append_log(">>> APPLICATION STARTING");
     let args: Vec<String> = std::env::args().collect();
-    if args.iter().any(|x| x == "-install") { 
-        return install_app(); 
+    if args.iter().any(|x| x == "-install") {
+        return install_app();
     }
     let start_in_tray = args.iter().any(|x| x == "--tray");
-    
+
+    let lock_path = crate::utils::get_config_dir().join("app.lock");
+    if let Ok(m) = fs::metadata(&lock_path) {
+        if let Ok(age) = m.modified().map(|t| t.elapsed().unwrap_or_default()) {
+            if age.as_secs() < 5 {
+                append_log("Another instance might be running. Exiting to avoid hang.");
+            }
+        }
+    }
+    let _ = fs::write(&lock_path, std::process::id().to_string());
+
     let config_data = load_config();
     let ui = AppWindow::new()?;
     let ui_weak = ui.as_weak();
-    
-    // VISUAL FEEDBACK: Show window ASAP
+
     if !start_in_tray {
         ui.window().show().unwrap();
     }
-    
+
     if let (Some(w), Some(h)) = (config_data.window_width, config_data.window_height) {
         ui.window().set_size(slint::PhysicalSize::new(w as u32, h as u32));
     }
     if let (Some(x), Some(y)) = (config_data.window_x, config_data.window_y) {
         ui.window().set_position(slint::PhysicalPosition::new(x, y));
     }
-    
+
     let t = get_current_translations();
     ui.set_l_title(t.title.into());
     ui.set_l_tab_devices(t.tab_devices.into());
@@ -166,7 +187,7 @@ fn main() -> anyhow::Result<()> {
     ui.set_l_volume(t.volume.into());
     ui.set_l_open_logs(t.open_logs.into());
     #[cfg(target_os = "linux")] ui.set_status(t.status_ready.into());
-    
+
     let cfg_arc = Arc::new(Mutex::new(config_data.clone()));
     {
         let c = cfg_arc.lock().unwrap();
@@ -174,8 +195,9 @@ fn main() -> anyhow::Result<()> {
         ui.set_bluetooth_enabled(c.bluetooth_enabled);
         ui.set_filter_enabled(c.filter_enabled);
         ui.set_hide_unknown_bt(c.hide_unknown_bt);
-        
+
         if !c.cached_sinks.is_empty() || !c.cached_sources.is_empty() {
+            append_log("Loading cached devices into UI...");
             let cached_sinks: Vec<PactlDevice> = c.cached_sinks.iter().map(|d| PactlDevice {
                 name: d.name.clone(),
                 description: d.description.clone(),
@@ -193,34 +215,29 @@ fn main() -> anyhow::Result<()> {
     let ui_weak_tray = ui_weak.clone();
     let tray_title = t.title.to_string();
     let menu_quit_text = t.menu_quit.to_string();
-    
+
+    #[cfg(target_os = "linux")]
     thread::spawn(move || {
-        #[cfg(target_os = "linux")]
-        if let Err(e) = gtk::init() {
-            append_log(&format!("GTK init failed (tray icon unavailable): {}", e));
-            return;
-        }
-        let menu = Menu::new();
-        let q_i = MenuItem::new(&menu_quit_text, true, None);
-        let q_id = q_i.id().clone();
-        let _ = menu.append_items(&[&q_i]);
-        let icon_res = match load_tray_icon() {
-            Some(icon) => icon,
-            None => { append_log("Tray icon not loaded, skipping tray setup."); return; }
-        };
-        
-        match TrayIconBuilder::new()
-            .with_menu(Box::new(menu))
-            .with_tooltip(&tray_title)
-            .with_icon(icon_res)
-            .build() {
-            Ok(icon) => {
+        append_log("Initializing system tray in background...");
+        if gtk::init().is_ok() {
+            let menu = Menu::new();
+            let q_i = MenuItem::new(&menu_quit_text, true, None);
+            let q_id = q_i.id().clone();
+            let _ = menu.append_items(&[&q_i]);
+            let icon_res = load_tray_icon();
+
+            if let Ok(icon) = TrayIconBuilder::new()
+                .with_menu(Box::new(menu))
+                .with_tooltip(&tray_title)
+                .with_icon(icon_res)
+                .build() {
+
                 append_log("Tray icon created successfully.");
                 let m_c = tray_icon::menu::MenuEvent::receiver();
                 thread::spawn(move || {
                     loop { if let Ok(e) = m_c.recv() { if e.id == q_id { std::process::exit(0); } } }
                 });
-                
+
                 let t_c = tray_icon::TrayIconEvent::receiver();
                 let u_i = ui_weak_tray.clone();
                 thread::spawn(move || {
@@ -233,18 +250,19 @@ fn main() -> anyhow::Result<()> {
                         }
                     }
                 });
-                
+
                 let _ = Box::leak(Box::new(icon));
-                #[cfg(target_os = "linux")]
-                loop { 
+                loop {
                     while gtk::events_pending() { gtk::main_iteration_do(false); }
                     thread::sleep(std::time::Duration::from_millis(50));
                 }
-                #[cfg(not(target_os = "linux"))]
-                loop { thread::sleep(std::time::Duration::from_secs(3600)); }
             }
-            Err(e) => append_log(&format!("Tray icon build failed: {}", e)),
         }
+    });
+
+    #[cfg(not(target_os = "linux"))]
+    thread::spawn(move || {
+        loop { thread::sleep(std::time::Duration::from_secs(3600)); }
     });
 
     ui.window().on_close_requested(|| { slint::CloseRequestResponse::HideWindow });
@@ -261,38 +279,37 @@ fn main() -> anyhow::Result<()> {
         }
     });
 
-    let sinks_cache = Arc::new(Mutex::new(Vec::<PactlDevice>::new())); 
+    let sinks_cache = Arc::new(Mutex::new(Vec::<PactlDevice>::new()));
     let sources_cache = Arc::new(Mutex::new(Vec::<PactlDevice>::new()));
     let ui_weak_refresh = ui_weak.clone();
-    let config_arc_refresh = Arc::clone(&cfg_arc); 
-    let s_c_ref = Arc::clone(&sinks_cache); 
+    let config_arc_refresh = Arc::clone(&cfg_arc);
+    let s_c_ref = Arc::clone(&sinks_cache);
     let src_c_ref = Arc::clone(&sources_cache);
-    
+
     let refresh_fn = move || {
         let u_w = ui_weak_refresh.clone();
         let cfg_locked = config_arc_refresh.clone();
-        let sc = Arc::clone(&s_c_ref); 
+        let sc = Arc::clone(&s_c_ref);
         let srcc = Arc::clone(&src_c_ref);
         thread::spawn(move || {
-            append_log("Refresh scan started...");
-            let bt_h = thread::spawn(get_bluetooth_devices);
-            let sinks_h = thread::spawn(|| get_pactl_devices("sinks"));
-            let sources_h = thread::spawn(|| get_pactl_devices("sources"));
-            let bt = bt_h.join().unwrap_or_default();
-            let mut rs = sinks_h.join().unwrap_or(Ok(Vec::new())).unwrap_or_default();
-            let mut rsrc = sources_h.join().unwrap_or(Ok(Vec::new())).unwrap_or_default();
+            append_log("Scan: Scanning devices...");
+            let bt = get_bluetooth_devices();
+            let mut rs = Vec::new();
+            if let Ok(s) = get_pactl_devices("sinks") { rs.extend(s); }
             for b in bt.iter() {
                 let m = b.name.replace("bluez_connect.", "").replace(":", "_").to_lowercase();
                 if !rs.iter().any(|s| s.name.to_lowercase().contains(&m)) { rs.push(b.clone()); }
             }
+            let mut rsrc = Vec::new();
+            if let Ok(s) = get_pactl_devices("sources") { rsrc.extend(s); }
             for b in bt.iter() {
                 let m = b.name.replace("bluez_connect.", "").replace(":", "_").to_lowercase();
                 if !rsrc.iter().any(|s| s.name.to_lowercase().contains(&m)) { rsrc.push(b.clone()); }
             }
-            
+
             let rs_c = rs.clone();
             let rsrc_c = rsrc.clone();
-            
+
             let _ = slint::invoke_from_event_loop(move || {
                 if let Some(ui) = u_w.upgrade() {
                     let mut c = cfg_locked.lock().unwrap();
@@ -312,14 +329,14 @@ fn main() -> anyhow::Result<()> {
                     }
                     *sc.lock().unwrap() = rs_c;
                     *srcc.lock().unwrap() = rsrc_c;
-                    append_log("Refresh scan done.");
+                    append_log("Scan: Completed and UI updated.");
                 }
             });
         });
     };
-    
+
     let r_init = refresh_fn.clone();
-    slint::Timer::single_shot(std::time::Duration::from_millis(50), move || { r_init(); });
+    slint::Timer::single_shot(std::time::Duration::from_millis(500), move || { r_init(); });
     ui.on_refresh(refresh_fn.clone());
 
     let c_bt = Arc::clone(&cfg_arc);
@@ -366,12 +383,12 @@ fn main() -> anyhow::Result<()> {
         }
         r_e();
     });
-    
+
     let sc_c = Arc::clone(&sinks_cache);
     let src_c = Arc::clone(&sources_cache);
     let cfg_handler = Arc::clone(&cfg_arc);
     let ui_weak_handler = ui_weak.clone();
-    
+
     let handler = move |s_i: i32, src_i: i32| {
         if let Some(u) = ui_weak_handler.upgrade() {
             if s_i >= 0 {
@@ -448,7 +465,7 @@ fn main() -> anyhow::Result<()> {
             }
         }
     };
-    
+
     let h1 = handler.clone(); ui.on_sink_changed(move |idx| h1(idx, -1));
     let h2 = handler.clone(); ui.on_source_changed(move |idx| h2(-1, idx));
 
@@ -471,7 +488,8 @@ fn main() -> anyhow::Result<()> {
     });
 
     ui.run()?;
-    
+
+    append_log("Application shutting down.");
     let mut c = cfg_arc.lock().unwrap();
     let sz = ui.window().size();
     c.window_width = Some(sz.width as f32);
@@ -480,5 +498,6 @@ fn main() -> anyhow::Result<()> {
     c.window_x = Some(p.x);
     c.window_y = Some(p.y);
     save_config(&c);
+    append_log("Shutdown complete.");
     Ok(())
 }

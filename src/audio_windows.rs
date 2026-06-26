@@ -1,215 +1,275 @@
 // SPDX-License-Identifier: MIT
-// Windows audio backend using Core Audio API (WASAPI).
+// Windows audio backend using PowerShell + compiled C# helper.
 
 #![cfg(target_os = "windows")]
 
-use std::ffi::c_void;
-use windows::core::{GUID, PCWSTR, PWSTR};
-use windows::Win32::Devices::Properties::*;
-use windows::Win32::Foundation::*;
-use windows::Win32::Media::Audio::*;
-use windows::Win32::System::Com::*;
-use windows::Win32::System::Com::StructuredStorage::*;
-
+use std::path::PathBuf;
+use std::process::Command;
+use std::sync::Mutex;
 use crate::audio::PactlDevice;
 use crate::utils::append_log;
 
-// ── IPolicyConfig (undocumented COM interface for setting default endpoint) ──
-const CLSID_POLICY_CONFIG: GUID = GUID::from_u128(0xF8679F50_850A_41CF_9C72_430F290290C8);
-const IID_POLICY_CONFIG: GUID = GUID::from_u128(0xF8679F50_850A_41CF_9C72_430F290290C8);
+static HELPER_COMPILED: Mutex<bool> = Mutex::new(false);
+static HELPER_PATH: Mutex<Option<PathBuf>> = Mutex::new(None);
 
-#[repr(C)]
-struct PolicyConfigVtbl {
-    query_interface: unsafe extern "system" fn(*mut c_void, *const GUID, *mut *mut c_void) -> HRESULT,
-    add_ref: unsafe extern "system" fn(*mut c_void) -> u32,
-    release: unsafe extern "system" fn(*mut c_void) -> u32,
-    _m3: usize,
-    _m4: usize,
-    _m5: usize,
-    set_default_endpoint: unsafe extern "system" fn(*mut c_void, PCWSTR, u32) -> HRESULT,
-    _rest: [usize; 10],
+// ── PowerShell runner ──
+
+fn ps(script: &str) -> anyhow::Result<String> {
+    let tmp = std::env::temp_dir().join("audio-selector-ps.ps1");
+    std::fs::write(&tmp, script)?;
+    let out = Command::new("powershell")
+        .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"])
+        .arg(&tmp)
+        .output()?;
+    let _ = std::fs::remove_file(&tmp);
+    if !out.status.success() {
+        let err = String::from_utf8_lossy(&out.stderr);
+        return Err(anyhow::anyhow!("PowerShell: {}", err));
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
 
-#[repr(transparent)]
-struct PolicyConfig(*mut c_void);
+// ── C# helper source ──
 
-impl PolicyConfig {
-    unsafe fn create() -> anyhow::Result<Self> {
-        let mut ptr: *mut c_void = std::ptr::null_mut();
-        let hr = CoCreateInstance(
-            &CLSID_POLICY_CONFIG,
-            std::ptr::null(),
-            CLSCTX_INPROC_SERVER,
-            &IID_POLICY_CONFIG,
-            &mut ptr,
-        );
-        if hr.is_err() || ptr.is_null() {
-            return Err(anyhow::anyhow!("Failed to create PolicyConfig (COM)"));
-        }
-        Ok(PolicyConfig(ptr))
-    }
+const CS_SOURCE: &str = r#"
+using System;
+using System.Runtime.InteropServices;
 
-    unsafe fn set_default(&self, device_id: PCWSTR, role: u32) -> anyhow::Result<()> {
-        let vtbl = *(self.0 as *mut *const PolicyConfigVtbl);
-        let func = (*vtbl).set_default_endpoint;
-        let hr = func(self.0, device_id, role);
-        if hr.is_err() {
-            return Err(anyhow::anyhow!("SetDefaultEndpoint failed: {}", hr));
-        }
-        Ok(())
-    }
+[Guid("A95664D2-9614-4F35-A746-DE8DB63617E3"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+interface IMMDeviceEnumerator {
+    int EnumAudioEndpoints(int dataFlow, int dwStateMask, out object ppDevices);
+    int GetDefaultAudioEndpoint(int dataFlow, int role, out object ppDevice);
+    int GetDevice([MarshalAs(UnmanagedType.LPWStr)] string pwstrId, out object ppDevice);
+    int RegisterEndpointNotificationCallback(object pClient);
+    int UnregisterEndpointNotificationCallback(object pClient);
 }
 
-impl Drop for PolicyConfig {
-    fn drop(&mut self) {
-        if !self.0.is_null() {
-            unsafe {
-                let vtbl = *(self.0 as *mut *const PolicyConfigVtbl);
-                (*vtbl).release(self.0);
+[Guid("D666063F-1587-4E43-81F1-B948E807363F"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+interface IMMDevice {
+    int Activate(ref Guid riid, int dwClsCtx, IntPtr pActivationParams, [MarshalAs(UnmanagedType.IUnknown)] out object ppInterface);
+    int OpenPropertyStore(int stgmAccess, out object ppProperties);
+    int GetId([MarshalAs(UnmanagedType.LPWStr)] out string ppstrId);
+    int GetState(out int pdwState);
+}
+
+[Guid("5CDF2C82-841E-4546-9722-0CF74078229A"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+interface IAudioEndpointVolume {
+    int RegisterControlChangeNotify(IntPtr pNotify);
+    int UnregisterControlChangeNotify(IntPtr pNotify);
+    int GetChannelCount(out int pnChannelCount);
+    int SetMasterVolumeLevel(float fLevelDB, ref Guid pguidEventContext);
+    int SetMasterVolumeLevelScalar(float fLevel, ref Guid pguidEventContext);
+    int GetMasterVolumeLevel(out float pfLevelDB);
+    int GetMasterVolumeLevelScalar(out float pfLevel);
+    int SetChannelVolume(int nChannel, float fLevelDB, ref Guid pguidEventContext);
+    int SetChannelVolumeScalar(int nChannel, float fLevel, ref Guid pguidEventContext);
+    int GetChannelVolume(int nChannel, out float pfLevelDB);
+    int GetChannelVolumeScalar(int nChannel, out float pfLevel);
+    int SetMute(bool bMute, ref Guid pguidEventContext);
+    int GetMute(out bool pbMute);
+    int GetVolumeStepInfo(out int pnStep, out int pnStepCount);
+    int VolumeStepUp(ref Guid pguidEventContext);
+    int VolumeStepDown(ref Guid pguidEventContext);
+    int QueryHardwareSupport(out int pdwHardwareSupportMask);
+    int GetVolumeRange(out float pflMinVolumeDB, out float pflMaxVolumeDB, out float pflVolumeIncrementDB);
+}
+
+[Guid("F8679F50-850A-41CF-9C72-430F290290C8"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+interface IPolicyConfig {
+    int GetMixFormat(IntPtr, IntPtr);
+    int GetDeviceFormat(IntPtr, bool, IntPtr);
+    int ResetDeviceFormat(IntPtr);
+    int SetDeviceFormat(IntPtr, IntPtr, IntPtr);
+    int GetProcessingPeriod(IntPtr, bool, IntPtr);
+    int SetProcessingPeriod(IntPtr, IntPtr);
+    int GetShareMode(IntPtr, IntPtr);
+    int SetShareMode(IntPtr, IntPtr);
+    int GetPropertyValue(IntPtr, int, IntPtr, int, IntPtr);
+    int SetPropertyValue(IntPtr, int, IntPtr, int, IntPtr);
+    int SetDefaultEndpoint([MarshalAs(UnmanagedType.LPWStr)] string pszDeviceName, int role);
+    int SetEndpointVisibility(IntPtr, int);
+}
+
+[ComImport, Guid("BCDE0395-E52F-467C-8E3D-C4579291692E")]
+class MMDeviceEnumeratorImpl { }
+
+[ComImport, Guid("870AF99C-171D-4F9E-AF0D-E63DF40C2BC9")]
+class PolicyConfigImpl { }
+
+class AudioHelper {
+    static int Main(string[] args) {
+        try {
+            if (args.Length == 0) { Console.Error.WriteLine("no command"); return 1; }
+            switch (args[0]) {
+                case "set-default":
+                    if (args.Length < 2) return 1;
+                    SetDefault(args[1]);
+                    return 0;
+                case "volume-get":
+                    if (args.Length < 2) return 1;
+                    Console.WriteLine(GetVolume(args[1]).ToString("F6"));
+                    return 0;
+                case "volume-set":
+                    if (args.Length < 3) return 1;
+                    SetVolume(args[1], float.Parse(args[2]));
+                    return 0;
+                default:
+                    Console.Error.WriteLine("unknown cmd: " + args[0]);
+                    return 1;
             }
+        } catch (Exception e) {
+            Console.Error.WriteLine(e.Message);
+            return 1;
         }
     }
-}
 
-// ── COM guard ──
+    static void SetDefault(string deviceId) {
+        var pc = (IPolicyConfig)new PolicyConfigImpl();
+        for (int role = 0; role <= 2; role++)
+            pc.SetDefaultEndpoint(deviceId, role);
+    }
 
-struct ComGuard(bool);
+    static float GetVolume(string deviceId) {
+        var e = (IMMDeviceEnumerator)new MMDeviceEnumeratorImpl();
+        e.GetDevice(deviceId, out var devObj);
+        var d = (IMMDevice)devObj;
+        var iid = typeof(IAudioEndpointVolume).GUID;
+        d.Activate(ref iid, 1, IntPtr.Zero, out var epvObj);
+        var v = (IAudioEndpointVolume)epvObj;
+        v.GetMasterVolumeLevelScalar(out var lvl);
+        return lvl;
+    }
 
-impl ComGuard {
-    fn new() -> anyhow::Result<Self> {
-        let hr = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED)? };
-        Ok(ComGuard(hr == S_OK))
+    static void SetVolume(string deviceId, float level) {
+        var e = (IMMDeviceEnumerator)new MMDeviceEnumeratorImpl();
+        e.GetDevice(deviceId, out var devObj);
+        var d = (IMMDevice)devObj;
+        var iid = typeof(IAudioEndpointVolume).GUID;
+        d.Activate(ref iid, 1, IntPtr.Zero, out var epvObj);
+        var v = (IAudioEndpointVolume)epvObj;
+        var g = Guid.Empty;
+        v.SetMasterVolumeLevelScalar(level, ref g);
     }
 }
+"#;
 
-impl Drop for ComGuard {
-    fn drop(&mut self) {
-        if self.0 {
-            unsafe { CoUninitialize(); }
+// ── C# compiler detection & compilation ──
+
+fn find_csc() -> Option<PathBuf> {
+    let candidates = [
+        r"C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe",
+        r"C:\Windows\Microsoft.NET\Framework\v4.0.30319\csc.exe",
+        r"C:\Windows\Microsoft.NET\Framework64\v3.5\csc.exe",
+        r"C:\Windows\Microsoft.NET\Framework\v3.5\csc.exe",
+    ];
+    for c in &candidates {
+        let p = PathBuf::from(c);
+        if p.exists() { return Some(p); }
+    }
+    // Try PowerShell search
+    if let Ok(out) = ps(&format!(
+        r#"$p = Get-ChildItem "$env:windir\Microsoft.NET\Framework64\*\csc.exe" -ErrorAction SilentlyContinue | Sort Version -Descending | Select -First 1 -ExpandProperty FullName; if (-not $p) {{ $p = Get-ChildItem "$env:windir\Microsoft.NET\Framework\*\csc.exe" -ErrorAction SilentlyContinue | Sort Version -Descending | Select -First 1 -ExpandProperty FullName }}; Write-Output $p"#
+    )) {
+        let p = out.trim().to_string();
+        if !p.is_empty() { return Some(PathBuf::from(p)); }
+    }
+    None
+}
+
+fn compile_helper() -> anyhow::Result<PathBuf> {
+    let config_dir = crate::utils::get_config_dir();
+    let _ = std::fs::create_dir_all(&config_dir);
+    let cs_path = config_dir.join("audio-helper.cs");
+    let exe_path = config_dir.join("audio-helper.exe");
+
+    std::fs::write(&cs_path, CS_SOURCE)?;
+
+    if let Some(csc) = find_csc() {
+        let out = Command::new(&csc)
+            .args(["/target:exe", "/nologo", "/optimize", "/debug-"])
+            .arg(&format!("/out:{}", exe_path.display()))
+            .arg(&cs_path)
+            .output()?;
+        if out.status.success() {
+            append_log(&format!("C# helper compiled: {:?}", exe_path));
+            return Ok(exe_path);
         }
+        let err = String::from_utf8_lossy(&out.stderr);
+        append_log(&format!("csc failed, fallback to Add-Type: {}", err));
     }
-}
 
-// ── Helpers ──
-
-fn create_enumerator() -> anyhow::Result<IMMDeviceEnumerator> {
-    let enumerator: IMMDeviceEnumerator =
-        unsafe { CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_INPROC_SERVER)? };
-    Ok(enumerator)
-}
-
-fn friendly_name(store: &IPropertyStore) -> String {
-    unsafe {
-        match store.GetValue(&PKEY_Device_FriendlyName) {
-            Ok(prop) => match prop.GetString() {
-                Ok(bstr) => bstr.to_string().unwrap_or("Unknown".into()),
-                Err(_) => "Unknown".into(),
-            },
-            Err(_) => "Unknown".into(),
-        }
+    // Fallback: compile via Add-Type in PowerShell
+    let exe_path2 = config_dir.join("audio-helper2.exe");
+    let ps_script = format!(
+        r#"Add-Type -TypeDefinition @'{cs}'@ -OutputAssembly '{out}' -OutputType ConsoleApplication -ErrorAction Stop"#,
+        cs = CS_SOURCE.replace("'", "''"),
+        out = exe_path2.display().to_string().replace("'", "''")
+    );
+    let _ = ps(&ps_script)?;
+    if exe_path2.exists() {
+        std::fs::rename(&exe_path2, &exe_path)?;
     }
+    append_log(&format!("C# helper compiled via Add-Type: {:?}", exe_path));
+    Ok(exe_path)
 }
 
-fn device_volume(device: &IMMDevice) -> Option<i32> {
-    unsafe {
-        let ep_volume: IAudioEndpointVolume = match device.Activate(CLSCTX_INPROC_SERVER) {
-            Ok(v) => v,
-            Err(_) => return None,
-        };
-        let mut level: f32 = 0.0;
-        if ep_volume.GetMasterVolumeLevelScalar(&mut level).is_ok() {
-            Some((level * 100.0).round() as i32)
-        } else {
-            None
-        }
+fn ensure_helper() -> anyhow::Result<PathBuf> {
+    let mut compiled = HELPER_COMPILED.lock().unwrap();
+    if *compiled {
+        return Ok(HELPER_PATH.lock().unwrap().clone().unwrap());
     }
+    let exe = compile_helper()?;
+    HELPER_PATH.lock().unwrap() = Some(exe.clone());
+    *compiled = true;
+    Ok(exe)
 }
 
-fn flow(target: &str) -> EDataFlow {
-    match target {
-        "sources" => eCapture,
-        _ => eRender,
+fn run_helper(args: &[&str]) -> anyhow::Result<String> {
+    let exe = ensure_helper()?;
+    let out = Command::new(&exe).args(args).output()?;
+    if !out.status.success() {
+        let err = String::from_utf8_lossy(&out.stderr);
+        return Err(anyhow::anyhow!("helper failed: {}", err));
     }
-}
-
-fn wide(s: &str) -> Vec<u16> {
-    s.encode_utf16().chain(std::iter::once(0)).collect()
+    Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
 
 // ── Public API ──
 
 pub fn get_windows_devices(target: &str) -> anyhow::Result<Vec<PactlDevice>> {
-    let _com = ComGuard::new()?;
-    let enumerator = create_enumerator()?;
-
-    let collection = unsafe { enumerator.EnumAudioEndpoints(flow(target), DEVICE_STATE_ACTIVE)? };
-    let count = unsafe { collection.GetCount()? };
-
-    let mut devices = Vec::with_capacity(count as usize);
-    for i in 0..count {
-        let device = match unsafe { collection.Item(i) } {
-            Ok(d) => d,
-            Err(_) => continue,
-        };
-
-        let id = match unsafe { device.GetId() } {
-            Ok(id) => format!("{}", id),
-            Err(_) => continue,
-        };
-
-        let store = match unsafe { device.OpenPropertyStore(STGM_READ) } {
-            Ok(s) => s,
-            Err(_) => continue,
-        };
-
-        let name = friendly_name(&store);
-
-        let volume = if target == "sinks" {
-            device_volume(&device)
-        } else {
-            None
-        };
-
-        devices.push(PactlDevice {
-            name: id,
-            description: name,
-            volume: volume.map(|v| {
-                serde_json::json!({"0": {"value_percent": format!("{}%", v)}})
-            }),
-        });
-    }
-
-    Ok(devices)
+    let flow = if target == "sources" { "1" } else { "0" };
+    let script = format!(
+        r#"$t = if ({flow} -eq 1) {{ "Capture" }} else {{ "Render" }}
+$r = Get-ChildItem "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\MMDevices\Audio\$t" -ErrorAction SilentlyContinue | ForEach-Object {{
+    $id = $_.PSChildName
+    $n = (Get-ItemProperty "$($_.PSPath)\Properties\{{a45c254e-df1c-4efd-8020-67d146a850e0}}\14" -ErrorAction SilentlyContinue)."(default)"
+    if (-not $n) {{ $n = $id }}
+    [PSCustomObject]@{{Name=$id; Description=$n}}
+}}
+if (-not $r) {{ $r = @() }}
+ConvertTo-Json $r -Compress"#,
+        flow = flow
+    );
+    let json = ps(&script)?;
+    #[derive(serde::Deserialize)]
+    struct PsDev { Name: String, Description: String }
+    let devs: Vec<PsDev> = serde_json::from_str(&json).unwrap_or_default();
+    Ok(devs.into_iter().map(|d| PactlDevice {
+        name: d.Name,
+        description: d.Description,
+        volume: None,
+    }).collect())
 }
 
-pub fn apply_windows_device_change(target: &str, name: &str) -> anyhow::Result<()> {
-    let _com = ComGuard::new()?;
-    let policy = unsafe { PolicyConfig::create()? };
-    let w = wide(name);
-    let id = PCWSTR::from_raw(w.as_ptr());
-
-    unsafe {
-        policy.set_default(id, 0)?;
-        policy.set_default(id, 1)?;
-        policy.set_default(id, 2)?;
-    }
-
-    append_log(&format!("Set default {}: {}", target, name));
+pub fn apply_windows_device_change(_target: &str, name: &str) -> anyhow::Result<()> {
+    run_helper(&["set-default", name])?;
+    append_log(&format!("Set default {}: {}", _target, name));
     Ok(())
 }
 
 pub fn set_windows_volume(name: &str, vol: i32) -> anyhow::Result<()> {
-    let _com = ComGuard::new()?;
-    let enumerator = create_enumerator()?;
-    let w = wide(name);
-    let id = PCWSTR::from_raw(w.as_ptr());
-
-    let device = unsafe { enumerator.GetDevice(id)? };
-    let ep_volume: IAudioEndpointVolume = unsafe { device.Activate(CLSCTX_INPROC_SERVER)? };
-
     let level = (vol as f32).clamp(0.0, 100.0) / 100.0;
-    unsafe { ep_volume.SetMasterVolumeLevelScalar(level)?; }
-
+    run_helper(&["volume-set", name, &format!("{:.6}", level)])?;
     append_log(&format!("Set volume {}% for: {}", vol, name));
     Ok(())
 }
