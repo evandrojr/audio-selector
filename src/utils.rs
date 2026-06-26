@@ -14,9 +14,11 @@ pub fn get_log_path() -> PathBuf { get_config_dir().join("debug.log") }
 
 pub fn append_log(msg: &str) {
     use std::io::Write;
+    let log_msg = format!("{} - {}\n", chrono::Local::now().format("%Y-%m-%d %H:%M:%S"), msg);
+    print!("{}", log_msg); // Print to terminal as well
     let path = get_log_path();
     if let Ok(mut f) = fs::OpenOptions::new().create(true).append(true).open(&path) {
-        let _ = f.write_all(format!("{} - {}\n", chrono::Local::now().format("%Y-%m-%d %H:%M:%S"), msg).as_bytes());
+        let _ = f.write_all(log_msg.as_bytes());
     }
 }
 

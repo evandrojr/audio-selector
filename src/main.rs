@@ -118,11 +118,18 @@ fn update_ui_models(ui: &AppWindow, sinks: &[PactlDevice], sources: &[PactlDevic
 }
 
 fn main() -> anyhow::Result<()> {
-    append_log("Application starting...");
-    if std::env::args().any(|x| x == "-install") { return install_app(); }
+    append_log("Main started.");
+    if std::env::args().any(|x| x == "-install") { 
+        append_log("Installing app...");
+        return install_app(); 
+    }
     
+    append_log("Loading config...");
     let config_data = load_config();
+    
+    append_log("Creating Window...");
     let ui = AppWindow::new()?;
+    let ui_weak = ui.as_weak();
     
     if let (Some(w), Some(h)) = (config_data.window_width, config_data.window_height) {
         ui.window().set_size(slint::PhysicalSize::new(w as u32, h as u32));
@@ -131,10 +138,8 @@ fn main() -> anyhow::Result<()> {
         ui.window().set_position(slint::PhysicalPosition::new(x, y));
     }
     
-    let ui_weak = ui.as_weak();
-    let ui_handle = Arc::new(Mutex::new(ui_weak.clone()));
+    append_log("Setting translations...");
     let t = get_current_translations();
-    
     ui.set_l_title(t.title.into());
     ui.set_l_tab_devices(t.tab_devices.into());
     ui.set_l_advanced_options(t.advanced_options.into());
@@ -159,51 +164,65 @@ fn main() -> anyhow::Result<()> {
         ui.set_filter_enabled(c.filter_enabled);
         ui.set_hide_unknown_bt(c.hide_unknown_bt);
         
-        // Load from cache initially
-        let cached_sinks: Vec<PactlDevice> = c.cached_sinks.iter().map(|d| PactlDevice {
-            name: d.name.clone(),
-            description: d.description.clone(),
-            volume: Some(serde_json::json!({"0": {"value_percent": format!("{}%", d.volume_percent)}}))
-        }).collect();
-        let cached_sources: Vec<PactlDevice> = c.cached_sources.iter().map(|d| PactlDevice {
-            name: d.name.clone(),
-            description: d.description.clone(),
-            volume: None
-        }).collect();
-        update_ui_models(&ui, &cached_sinks, &cached_sources, &c);
+        if !c.cached_sinks.is_empty() || !c.cached_sources.is_empty() {
+            append_log("Loading cached devices...");
+            let cached_sinks: Vec<PactlDevice> = c.cached_sinks.iter().map(|d| PactlDevice {
+                name: d.name.clone(),
+                description: d.description.clone(),
+                volume: Some(serde_json::json!({"0": {"value_percent": format!("{}%", d.volume_percent)}}))
+            }).collect();
+            let cached_sources: Vec<PactlDevice> = c.cached_sources.iter().map(|d| PactlDevice {
+                name: d.name.clone(),
+                description: d.description.clone(),
+                volume: None
+            }).collect();
+            update_ui_models(&ui, &cached_sinks, &cached_sources, &c);
+        }
     }
 
-    if ui.get_bluetooth_enabled() { let _ = set_bluetooth_power(true); }
+    if ui.get_bluetooth_enabled() {
+        append_log("Bluetooth auto-power scheduled.");
+        thread::spawn(|| { let _ = set_bluetooth_power(true); });
+    }
 
     #[cfg(target_os = "linux")] {
-        if gtk::init().is_ok() {
-            let menu = Menu::new();
-            let q_i = MenuItem::new(t.menu_quit, true, None);
-            let q_id = q_i.id().clone();
-            let _ = menu.append_items(&[&q_i]);
-            if let Ok(icon) = TrayIconBuilder::new().with_menu(Box::new(menu)).with_tooltip(t.title).with_icon(load_tray_icon()).build() {
-                thread::spawn(move || {
-                    let m_c = tray_icon::menu::MenuEvent::receiver();
-                    loop { if let Ok(e) = m_c.recv() { if e.id == q_id { std::process::exit(0); } } }
-                });
-                let u_i = ui_weak.clone();
-                thread::spawn(move || {
-                    let t_c = tray_icon::TrayIconEvent::receiver();
-                    loop {
-                        if let Ok(e) = t_c.recv() {
-                            if let tray_icon::TrayIconEvent::Click { button: tray_icon::MouseButton::Left, .. } = e {
-                                let ui_inner = u_i.clone();
-                                let _ = slint::invoke_from_event_loop(move || { if let Some(uw) = ui_inner.upgrade() { uw.window().show().unwrap(); } });
+        append_log("Tray setup starting...");
+        let ui_weak_tray = ui_weak.clone();
+        let tray_title = t.title;
+        let menu_quit_text = t.menu_quit;
+        thread::spawn(move || {
+            append_log("GTK init in thread...");
+            if gtk::init().is_ok() {
+                let menu = Menu::new();
+                let q_i = MenuItem::new(menu_quit_text, true, None);
+                let q_id = q_i.id().clone();
+                let _ = menu.append_items(&[&q_i]);
+                if let Ok(icon) = TrayIconBuilder::new().with_menu(Box::new(menu)).with_tooltip(tray_title).with_icon(load_tray_icon()).build() {
+                    append_log("Tray icon built.");
+                    thread::spawn(move || {
+                        let m_c = tray_icon::menu::MenuEvent::receiver();
+                        loop { if let Ok(e) = m_c.recv() { if e.id == q_id { std::process::exit(0); } } }
+                    });
+                    let u_i = ui_weak_tray.clone();
+                    thread::spawn(move || {
+                        let t_c = tray_icon::TrayIconEvent::receiver();
+                        loop {
+                            if let Ok(e) = t_c.recv() {
+                                if let tray_icon::TrayIconEvent::Click { button: tray_icon::MouseButton::Left, .. } = e {
+                                    let ui_inner = u_i.clone();
+                                    let _ = slint::invoke_from_event_loop(move || { if let Some(uw) = ui_inner.upgrade() { uw.window().show().unwrap(); } });
+                                }
                             }
                         }
+                    });
+                    let _ = Box::leak(Box::new(icon));
+                    loop { 
+                        if gtk::events_pending() { gtk::main_iteration_do(false); }
+                        thread::sleep(std::time::Duration::from_millis(50));
                     }
-                });
-                let _ = Box::leak(Box::new(icon));
-                let gtk_t = slint::Timer::default();
-                gtk_t.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(50), move || { while gtk::events_pending() { gtk::main_iteration_do(false); } });
-                Box::leak(Box::new(gtk_t));
+                }
             }
-        }
+        });
     }
 
     ui.window().on_close_requested(|| { slint::CloseRequestResponse::HideWindow });
@@ -222,18 +241,18 @@ fn main() -> anyhow::Result<()> {
 
     let sinks_cache = Arc::new(Mutex::new(Vec::<PactlDevice>::new())); 
     let sources_cache = Arc::new(Mutex::new(Vec::<PactlDevice>::new()));
-    let ui_ref_refresh = Arc::clone(&ui_handle); 
-    let config_ref_refresh = Arc::clone(&cfg_arc); 
+    let ui_weak_refresh = ui_weak.clone();
+    let config_arc_refresh = Arc::clone(&cfg_arc); 
     let s_c_ref = Arc::clone(&sinks_cache); 
     let src_c_ref = Arc::clone(&sources_cache);
     
     let refresh_fn = move || {
-        let u_w = ui_ref_refresh.lock().unwrap().clone(); 
-        let cfg_locked = config_ref_refresh.clone();
+        let u_w = ui_weak_refresh.clone();
+        let cfg_locked = config_arc_refresh.clone();
         let sc = Arc::clone(&s_c_ref); 
         let srcc = Arc::clone(&src_c_ref);
         thread::spawn(move || {
-            append_log("Refresh started...");
+            append_log("Refresh scan started...");
             let bt = get_bluetooth_devices();
             let mut rs = Vec::new();
             if let Ok(s) = get_pactl_devices("sinks") { rs.extend(s); }
@@ -254,31 +273,30 @@ fn main() -> anyhow::Result<()> {
             let _ = slint::invoke_from_event_loop(move || {
                 if let Some(ui) = u_w.upgrade() {
                     let mut c = cfg_locked.lock().unwrap();
-                    update_ui_models(&ui, &rs_c, &rsrc_c, &c);
-                    
-                    // Update cache in config
-                    c.cached_sinks = rs_c.iter().map(|d| CachedDevice {
-                        name: d.name.clone(),
-                        description: d.description.clone(),
-                        volume_percent: d.get_volume_percent(),
-                    }).collect();
-                    c.cached_sources = rsrc_c.iter().map(|d| CachedDevice {
-                        name: d.name.clone(),
-                        description: d.description.clone(),
-                        volume_percent: 0,
-                    }).collect();
-                    save_config(&c);
-                    
+                    if !rs_c.is_empty() || !rsrc_c.is_empty() {
+                        update_ui_models(&ui, &rs_c, &rsrc_c, &c);
+                        c.cached_sinks = rs_c.iter().map(|d| CachedDevice {
+                            name: d.name.clone(),
+                            description: d.description.clone(),
+                            volume_percent: d.get_volume_percent(),
+                        }).collect();
+                        c.cached_sources = rsrc_c.iter().map(|d| CachedDevice {
+                            name: d.name.clone(),
+                            description: d.description.clone(),
+                            volume_percent: 0,
+                        }).collect();
+                        save_config(&c);
+                    }
                     *sc.lock().unwrap() = rs_c;
                     *srcc.lock().unwrap() = rsrc_c;
-                    append_log("Refresh done.");
+                    append_log("Refresh scan done.");
                 }
             });
         });
     };
     
     let r_init = refresh_fn.clone();
-    r_init();
+    slint::Timer::single_shot(std::time::Duration::from_millis(500), move || { r_init(); });
     ui.on_refresh(refresh_fn.clone());
 
     let c_bt = Arc::clone(&cfg_arc);
@@ -299,22 +317,14 @@ fn main() -> anyhow::Result<()> {
     let c_f = Arc::clone(&cfg_arc);
     let r2 = refresh_fn.clone();
     ui.on_toggle_filter(move |on| {
-        {
-            let mut c = c_f.lock().unwrap();
-            c.filter_enabled = on;
-            save_config(&c);
-        }
+        { let mut c = c_f.lock().unwrap(); c.filter_enabled = on; save_config(&c); }
         r2();
     });
 
     let c_h = Arc::clone(&cfg_arc);
     let r_h = refresh_fn.clone();
     ui.on_toggle_hide_unknown_bt(move |on| {
-        {
-            let mut c = c_h.lock().unwrap();
-            c.hide_unknown_bt = on;
-            save_config(&c);
-        }
+        { let mut c = c_h.lock().unwrap(); c.hide_unknown_bt = on; save_config(&c); }
         r_h();
     });
 
@@ -333,19 +343,18 @@ fn main() -> anyhow::Result<()> {
     
     let sc_c = Arc::clone(&sinks_cache);
     let src_c = Arc::clone(&sources_cache);
-    let c_c = Arc::clone(&cfg_arc);
-    let ui_h_handler = Arc::clone(&ui_handle);
+    let cfg_handler = Arc::clone(&cfg_arc);
+    let ui_weak_handler = ui_weak.clone();
     
     let handler = move |s_i: i32, src_i: i32| {
-        let u_opt = ui_h_handler.lock().unwrap().upgrade();
-        if let Some(u) = u_opt {
+        if let Some(u) = ui_weak_handler.upgrade() {
             if s_i >= 0 {
                 let sks = sc_c.lock().unwrap();
                 if (s_i as usize) < sks.len() {
                     let n = sks[s_i as usize].name.clone();
-                    let u_a = ui_h_handler.lock().unwrap().clone();
+                    let u_a = ui_weak_handler.clone();
                     let sr_a = Arc::clone(&src_c);
-                    let cf_a = Arc::clone(&c_c);
+                    let cf_a = Arc::clone(&cfg_handler);
                     u.set_sink_volume(sks[s_i as usize].get_volume_percent());
                     thread::spawn(move || {
                         let ta = get_current_translations();
@@ -387,8 +396,8 @@ fn main() -> anyhow::Result<()> {
                 let srcs = src_c.lock().unwrap();
                 if (src_i as usize) < srcs.len() {
                     let n = srcs[src_i as usize].name.clone();
-                    let cf_a = Arc::clone(&c_c);
-                    let u_a = ui_h_handler.lock().unwrap().clone();
+                    let cf_a = Arc::clone(&cfg_handler);
+                    let u_a = ui_weak_handler.clone();
                     thread::spawn(move || {
                         let ta = get_current_translations();
                         let mut an = n.clone();
@@ -414,15 +423,13 @@ fn main() -> anyhow::Result<()> {
         }
     };
     
-    let h1 = handler.clone();
-    ui.on_sink_changed(move |idx| h1(idx, -1));
-    let h2 = handler.clone();
-    ui.on_source_changed(move |idx| h2(-1, idx));
+    let h1 = handler.clone(); ui.on_sink_changed(move |idx| h1(idx, -1));
+    let h2 = handler.clone(); ui.on_source_changed(move |idx| h2(-1, idx));
 
     let s_vol = Arc::clone(&sinks_cache);
-    let ui_v_ref = Arc::clone(&ui_handle);
+    let ui_v_ref = ui_weak.clone();
     ui.on_sink_volume_changed(move |v| {
-        if let Some(u) = ui_v_ref.lock().unwrap().upgrade() {
+        if let Some(u) = ui_v_ref.upgrade() {
             let idx = u.get_selected_sink_index();
             if idx >= 0 {
                 let s = s_vol.lock().unwrap();
@@ -434,17 +441,18 @@ fn main() -> anyhow::Result<()> {
         }
     });
 
-    let win = ui.window();
-    let c_ex = Arc::clone(&cfg_arc);
+    append_log("Starting Slint event loop...");
     ui.run()?;
     
-    let mut c = c_ex.lock().unwrap();
-    let sz = win.size();
+    append_log("Application closing...");
+    let mut c = cfg_arc.lock().unwrap();
+    let sz = ui.window().size();
     c.window_width = Some(sz.width as f32);
     c.window_height = Some(sz.height as f32);
-    let p = win.position();
+    let p = ui.window().position();
     c.window_x = Some(p.x);
     c.window_y = Some(p.y);
     save_config(&c);
+    append_log("Shutdown complete.");
     Ok(())
 }
