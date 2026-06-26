@@ -2,11 +2,11 @@ name: Build and Release
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "main", "windows" ]
     tags:
       - 'v*'
   pull_request:
-    branches: [ "main" ]
+    branches: [ "main", "windows" ]
 
 permissions:
   contents: write
