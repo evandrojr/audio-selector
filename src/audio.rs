@@ -29,6 +29,16 @@ impl PactlDevice {
 }
 
 #[cfg(target_os = "linux")]
+fn run_pactl(args: &[&str]) -> std::io::Result<std::process::Output> {
+    Command::new("timeout").args(["10s", "pactl"]).args(args).env("LC_ALL", "C").output()
+}
+
+#[cfg(not(target_os = "linux"))]
+fn run_pactl(args: &[&str]) -> std::io::Result<std::process::Output> {
+    Command::new("pactl").args(args).output()
+}
+
+#[cfg(target_os = "linux")]
 pub fn get_pactl_devices(target: &str) -> anyhow::Result<Vec<PactlDevice>> {
     // Use timeout command to prevent long hangs if PulseAudio is stuck
     let output = Command::new("timeout").args(["3s", "pactl", "--format=json", "list", target])
@@ -62,15 +72,26 @@ pub fn get_pactl_devices(target: &str) -> anyhow::Result<Vec<PactlDevice>> {
 pub fn get_pactl_devices(_: &str) -> anyhow::Result<Vec<PactlDevice>> { Ok(Vec::new()) }
 
 #[cfg(target_os = "linux")]
+fn run_pactl_short(args: &[&str]) -> std::io::Result<std::process::ExitStatus> {
+    Command::new("timeout").args(["5s", "pactl"]).args(args).env("LC_ALL", "C").status()
+}
+
+#[cfg(not(target_os = "linux"))]
+fn run_pactl_short(args: &[&str]) -> std::io::Result<std::process::ExitStatus> {
+    Command::new("pactl").args(args).status()
+}
+
+#[cfg(target_os = "linux")]
 pub fn apply_device_change(target: &str, name: &str) -> anyhow::Result<()> {
-    let _ = Command::new("timeout").args(["5s", "pactl", "set-default-sink", name]).env("LC_ALL", "C").status();
+    let set_cmd = if target == "sinks" { "set-default-sink" } else { "set-default-source" };
+    let _ = run_pactl_short(&[set_cmd, name]);
     let cmd = if target == "sinks" { "move-sink-input" } else { "move-source-output" };
     let list_cmd = if target == "sinks" { "sink-inputs" } else { "source-outputs" };
     
-    if let Ok(o) = Command::new("timeout").args(["5s", "pactl", "list", "short", list_cmd]).env("LC_ALL", "C").output() {
+    if let Ok(o) = run_pactl(&["list", "short", list_cmd]) {
         for line in String::from_utf8_lossy(&o.stdout).lines() {
             if let Some(id) = line.split_whitespace().next() {
-                let _ = Command::new("timeout").args(["5s", "pactl", cmd, id, name]).env("LC_ALL", "C").status();
+                let _ = run_pactl_short(&[cmd, id, name]);
             }
         }
     }
@@ -82,7 +103,7 @@ pub fn apply_device_change(_: &str, _: &str) -> anyhow::Result<()> { Ok(()) }
 
 #[cfg(target_os = "linux")]
 pub fn set_sink_volume(name: &str, vol: i32) -> anyhow::Result<()> {
-    let _ = Command::new("timeout").args(["2s", "pactl", "set-sink-volume", name, &format!("{}%", vol)]).env("LC_ALL", "C").status();
+    let _ = run_pactl_short(&["set-sink-volume", name, &format!("{}%", vol)]);
     Ok(())
 }
 
