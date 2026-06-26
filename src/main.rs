@@ -11,19 +11,7 @@ use std::thread;
 use sys_locale::get_locale;
 use std::path::PathBuf;
 
-use tray_icon::{
-    menu::{Menu, MenuEvent, MenuItem},
-    TrayIconBuilder, Icon,
-};
-
 const CONFIG_FILE: &str = "config.json";
-
-fn load_tray_icon() -> Icon {
-    let image = image::open("ui/assets/icon.png").expect("Failed to open icon path");
-    let image = image::imageops::resize(&image, 64, 64, image::imageops::FilterType::Lanczos3);
-    let (width, height) = image.dimensions();
-    Icon::from_rgba(image.into_raw(), width, height).expect("Failed to open icon")
-}
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 #[serde(default)]
@@ -393,22 +381,30 @@ fn install_app() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn main() -> anyhow::Result<()> {
+fn append_log(msg: &str) {
+    use std::io::Write;
     let log_path = dirs::home_dir().unwrap_or_default().join("audio-selector-debug.log");
-    let _ = fs::write(&log_path, "Starting Audio Selector...\n");
+    if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(&log_path) {
+        let _ = file.write_all(msg.as_bytes());
+    }
+}
+
+fn main() -> anyhow::Result<()> {
+    let _ = fs::write(dirs::home_dir().unwrap_or_default().join("audio-selector-debug.log"), ""); // clear log
+    append_log("Starting Audio Selector...\n");
 
     if std::env::args().any(|x| x == "-install") { 
-        let _ = fs::write(&log_path, "Running installer...\n");
+        append_log("Running installer...\n");
         return install_app(); 
     }
     
-    let _ = fs::write(&log_path, "Loading config...\n");
+    append_log("Loading config...\n");
     let config_data = load_config();
     
-    let _ = fs::write(&log_path, "Building UI...\n");
+    append_log("Building UI...\n");
     let ui = AppWindow::new()?;
     
-    let _ = fs::write(&log_path, "Applying geometry...\n");
+    append_log("Applying geometry...\n");
     if let (Some(w), Some(h)) = (config_data.window_width, config_data.window_height) { ui.window().set_size(slint::PhysicalSize::new(w as u32, h as u32)); }
     if let (Some(x), Some(y)) = (config_data.window_x, config_data.window_y) { ui.window().set_position(slint::PhysicalPosition::new(x, y)); }
     let ui_weak = ui.as_weak();
@@ -442,66 +438,6 @@ fn main() -> anyhow::Result<()> {
         ui.set_hide_unknown_bt(c.hide_unknown_bt);
     }
     if ui.get_bluetooth_enabled() { let _ = set_bluetooth_power(true); }
-
-    // Init GTK after Winit (Slint) has initialized the display to avoid GDK panics
-    #[cfg(target_os = "linux")]
-    {
-        if let Err(e) = gtk::init() {
-            println!("Warning: Failed to init GTK for tray icon: {}", e);
-        }
-    }
-
-    let tray_menu = Menu::new();
-    let quit_item = MenuItem::new(t_static.menu_quit, true, None);
-    let quit_id = quit_item.id().clone();
-    let _ = tray_menu.append_items(&[&quit_item]);
-    let mut _tray_icon = None;
-    
-    if let Ok(builder) = TrayIconBuilder::new().with_menu(Box::new(tray_menu)).with_tooltip(t_static.title).with_icon(load_tray_icon()).build() {
-        _tray_icon = Some(builder);
-    } else {
-        println!("Warning: Failed to build tray icon.");
-    }
-
-    #[cfg(target_os = "linux")]
-    {
-        let gtk_timer = slint::Timer::default();
-        gtk_timer.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(50), move || {
-            while gtk::events_pending() { gtk::main_iteration_do(false); }
-        });
-        Box::leak(Box::new(gtk_timer)); 
-    }
-
-    ui.window().on_close_requested(|| { slint::CloseRequestResponse::HideWindow });
-
-    let ui_tray = ui_weak.clone();
-    let ui_tray_icon = ui_weak.clone();
-    
-    thread::spawn(move || {
-        let menu_channel = MenuEvent::receiver();
-        loop {
-            if let Ok(event) = menu_channel.recv() {
-                if event.id == quit_id { std::process::exit(0); }
-            }
-        }
-    });
-
-    thread::spawn(move || {
-        let tray_channel = tray_icon::TrayIconEvent::receiver();
-        loop {
-            if let Ok(event) = tray_channel.recv() {
-                if let tray_icon::TrayIconEvent::Click { button: tray_icon::MouseButton::Left, .. } = event {
-                    let u = ui_tray_icon.clone();
-                    let _ = slint::invoke_from_event_loop(move || { 
-                        let unwrapped = u.unwrap();
-                        let win = unwrapped.window();
-                        win.show().unwrap(); 
-                        win.set_minimized(false);
-                    });
-                }
-            }
-        }
-    });
 
     let sinks_cache = Arc::new(Mutex::new(Vec::<PactlDevice>::new()));
     let sources_cache = Arc::new(Mutex::new(Vec::<PactlDevice>::new()));
