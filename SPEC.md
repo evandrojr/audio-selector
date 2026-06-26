@@ -4,32 +4,27 @@
 A Rust-based desktop application using the Slint GUI framework to manage system audio devices (Input and Output) on Linux systems (PulseAudio/PipeWire).
 
 ## Features
-- **Multi-language Support:**
-  - Automatic locale detection (system language).
-  - Supported languages: English (default), Portuguese.
 - **Real-time Audio Switching:**
   - **No Apply Button:** Device changes happen immediately when selected in the dropdown.
   - **Force Move:** Uses `pactl move-sink-input` to force currently playing audio to the new device (e.g., HDMI, Bluetooth).
-  - **Unified Mode:** Toggle switch to use the same device for input/output.
 - **Advanced Bluetooth Control:**
-  - **Bluetooth Switch:** Real-time toggle for Bluetooth power.
-  - **Hardware Detection:** Switch is disabled if no Bluetooth controller is found.
-  - **Force Connection:** Lists paired (even if disconnected) Bluetooth devices. Selecting one attempts to `connect` via `bluetoothctl` and then switches audio to it.
-- **Persistence:** Saves and loads settings (Unified Mode, Bluetooth state, last selected devices) to/from `config.json`.
-- **User Interface:**
-  - Modern Slint `Switch` widgets.
-  - Application Icon included in the window.
-  - Clean design without redundant headers.
+  - **Auto Connection:** Lists paired (even if disconnected) Bluetooth devices. Selecting one attempts to `connect` via `bluetoothctl` and then switches audio to it.
+  - **Hide Unknown MACs:** Feature to filter out Bluetooth devices consisting of just MAC addresses (e.g., neighbors' TVs).
+- **Advanced Options Tab:**
+  - **Excluded Devices:** A robust Checkbox list to hide unwanted outputs/inputs (like HDMI monitors) from the main dropdowns.
+- **Persistence & UI:**
+  - **System Tray:** Minimizes to the system tray (`tray-icon`).
+  - **Window Memory:** Saves and loads position and dimensions to/from `config.json`.
+  - **Multi-language:** Supports 6 languages based on system locale (EN, PT, ES, FR, DE, IT).
 
 ## Technical Stack
-- **Language:** Rust
-- **GUI:** Slint 1.8.0
+- **GUI:** Slint 1.8.0.
 - **System Backend:** `pactl` (PulseAudio/PipeWire) and `bluetoothctl`.
-- **Localization:** `sys-locale` for detection.
-- **Storage:** `serde_json` for persistence.
-- **Time/Status:** `chrono` for timestamped feedback.
+- **System Integration:** `tray-icon` (AppIndicator/GTK), `dirs`.
 
-## Implementation Details
-- **Immediate Apply:** Rust callbacks trigger both `set-default-*` and `move-sink-input` for instant results.
-- **Bluetooth Fix:** Paired devices from `bluetoothctl` are merged into the sink list. Selecting one triggers an automatic connection attempt.
-- **Icon:** Embedded PNG icon in the `ui/assets` directory.
+## Installation & Autostart
+Run the binary with the `-install` flag to copy the app to your `PATH` and set it to start with your window manager:
+```bash
+./audio-selector -install
+```
+This automatically handles `.desktop` files in `~/.local/share/applications` and `~/.config/autostart/`.

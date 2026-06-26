@@ -1,11 +1,17 @@
-import { Button, Switch, ComboBox, GroupBox, VerticalBox, HorizontalBox, LineEdit } from "std-widgets.slint";
+import { Button, Switch, ComboBox, GroupBox, VerticalBox, HorizontalBox, ScrollView, TabWidget, CheckBox, Slider } from "std-widgets.slint";
+
+export struct DeviceToggle {
+    name: string,
+    description: string,
+    excluded: bool,
+}
 
 export component AppWindow inherits Window {
     title: l_title;
     icon: @image-url("assets/icon.png");
     
     min-width: 500px;
-    min-height: 500px;
+    min-height: 450px;
 
     // Callbacks
     callback refresh();
@@ -14,21 +20,28 @@ export component AppWindow inherits Window {
     callback toggle_bluetooth(bool);
     callback toggle_unified(bool);
     callback toggle_filter(bool);
-    callback filter_words_changed(string);
+    callback toggle_device_exclusion(string, bool);
+    callback toggle_hide_unknown_bt(bool);
+    callback sink_volume_changed(int);
 
     // Localization properties
     in property <string> l_title: "Audio Selector";
+    in property <string> l_tab_devices: "Devices";
+    in property <string> l_advanced_options: "Advanced Options";
+    in property <string> l_hide_unknown_bt: "Hide unknown Bluetooth devices (MACs)";
     in property <string> l_bluetooth: "Bluetooth";
     in property <string> l_unified: "Use same device for input/output";
     in property <string> l_output: "Output Device";
     in property <string> l_input: "Input Device";
     in property <string> l_audio_device: "Audio Device";
     in property <string> l_refresh: "Refresh Devices";
-    in property <string> l_filter_active: "Enable Device Filter";
-    in property <string> l_filter_words: "Blacklist (comma separated):";
+    in property <string> l_filter_active: "Enable Excluded Devices";
+    in property <string> l_exclude_instruction: "Check devices below to hide them from the main list:";
+    in property <string> l_volume: "Volume";
 
     in property <[string]> sink_names: [];
     in property <[string]> source_names: [];
+    in property <[DeviceToggle]> all_devices: [];
     in property <string> status: "Ready";
     in property <bool> bluetooth_available: true;
     
@@ -37,89 +50,150 @@ export component AppWindow inherits Window {
     in-out property <bool> unified_mode: true;
     in-out property <bool> bluetooth_enabled: false;
     in-out property <bool> filter_enabled: false;
-    in-out property <string> filter_words: "";
+    in-out property <bool> hide_unknown_bt: false;
+    in-out property <int> sink_volume: 50;
 
     VerticalBox {
         spacing: 15px;
-        padding: 20px;
+        padding: 10px;
 
-        // Settings Section
-        GroupBox {
-            title: "Settings";
-            VerticalBox {
-                spacing: 10px;
-                padding: 10px;
-                
-                HorizontalBox {
-                    alignment: space-between;
-                    Text { text: l_bluetooth; vertical-alignment: center; }
-                    Switch {
-                        checked: bluetooth_enabled;
-                        enabled: bluetooth_available;
-                        toggled => {
-                            bluetooth_enabled = !bluetooth_enabled;
-                            toggle_bluetooth(bluetooth_enabled);
+        TabWidget {
+            Tab {
+                title: l_tab_devices;
+                ScrollView {
+                    VerticalBox {
+                        spacing: 15px;
+                        padding: 10px;
+
+                        HorizontalBox {
+                            alignment: space-between;
+                            Text { text: l_bluetooth; vertical-alignment: center; }
+                            Switch {
+                                checked: bluetooth_enabled;
+                                enabled: bluetooth_available;
+                                toggled => {
+                                    bluetooth_enabled = !bluetooth_enabled;
+                                    toggle_bluetooth(bluetooth_enabled);
+                                }
+                            }
                         }
-                    }
-                }
 
-                HorizontalBox {
-                    alignment: space-between;
-                    Text { text: l_unified; vertical-alignment: center; }
-                    Switch {
-                        checked: unified_mode;
-                        toggled => {
-                            unified_mode = !unified_mode;
-                            toggle_unified(unified_mode);
+                        HorizontalBox {
+                            alignment: space-between;
+                            Text { text: l_unified; vertical-alignment: center; }
+                            Switch {
+                                checked: unified_mode;
+                                toggled => {
+                                    unified_mode = !unified_mode;
+                                    toggle_unified(unified_mode);
+                                }
+                            }
                         }
-                    }
-                }
 
-                HorizontalBox {
-                    alignment: space-between;
-                    Text { text: l_filter_active; vertical-alignment: center; }
-                    Switch {
-                        checked: filter_enabled;
-                        toggled => {
-                            filter_enabled = !filter_enabled;
-                            toggle_filter(filter_enabled);
+                        // Device Selectors
+                        GroupBox {
+                            title: unified_mode ? l_audio_device : l_output;
+                            VerticalBox {
+                                spacing: 15px;
+                                ComboBox {
+                                    model: sink_names;
+                                    current-index <=> selected_sink_index;
+                                    selected => {
+                                        sink_changed(selected_sink_index);
+                                    }
+                                }
+
+                                HorizontalBox {
+                                    spacing: 10px;
+                                    Text { 
+                                        text: l_volume + ": " + sink_volume + "%"; 
+                                        vertical-alignment: center; 
+                                        width: 100px;
+                                    }
+                                    Slider {
+                                        minimum: 0;
+                                        maximum: 100;
+                                        value: sink_volume;
+                                        changed(val) => {
+                                            sink_volume = val;
+                                            sink_volume_changed(val);
+                                        }
+                                    }
+                                }
+                            }
                         }
-                    }
-                }
 
-                if filter_enabled : VerticalBox {
-                    spacing: 5px;
-                    Text { text: l_filter_words; font-size: 12px; }
-                    LineEdit {
-                        text: filter_words;
-                        edited(t) => {
-                            filter_words = t;
-                            filter_words_changed(t);
+                        if !unified_mode : GroupBox {
+                            title: l_input;
+                            ComboBox {
+                                model: source_names;
+                                current-index <=> selected_source_index;
+                                selected => {
+                                    source_changed(selected_source_index);
+                                }
+                            }
                         }
                     }
                 }
             }
-        }
 
-        // Device Selectors
-        GroupBox {
-            title: unified_mode ? l_audio_device : l_output;
-            ComboBox {
-                model: sink_names;
-                current-index <=> selected_sink_index;
-                selected => {
-                    sink_changed(selected_sink_index);
-                }
-            }
-        }
+            Tab {
+                title: l_advanced_options;
+                ScrollView {
+                    VerticalBox {
+                        spacing: 15px;
+                        padding: 10px;
 
-        if !unified_mode : GroupBox {
-            title: l_input;
-            ComboBox {
-                model: source_names;
-                current-index <=> selected_source_index;
-                selected => {
-                    source_changed(selected_source_index);
+                        HorizontalBox {
+                            alignment: space-between;
+                            Text { text: l_hide_unknown_bt; vertical-alignment: center; }
+                            Switch {
+                                checked: hide_unknown_bt;
+                                toggled => {
+                                    hide_unknown_bt = !hide_unknown_bt;
+                                    toggle_hide_unknown_bt(hide_unknown_bt);
+                                }
+                            }
+                        }
+
+                        HorizontalBox {
+                            alignment: space-between;
+                            Text { text: l_filter_active; vertical-alignment: center; font-weight: 700; }
+                            Switch {
+                                checked: filter_enabled;
+                                toggled => {
+                                    filter_enabled = !filter_enabled;
+                                    toggle_filter(filter_enabled);
+                                }
+                            }
+                        }
+
+                        if filter_enabled : VerticalBox {
+                            spacing: 10px;
+                            Text { text: l_exclude_instruction; font-size: 12px; }
+                            
+                            Rectangle {
+                                border-radius: 4px;
+                                border-color: #ddd;
+                                border-width: 1px;
+                                background: #fafafa;
+                                min-height: 150px;
+                                ScrollView {
+                                    VerticalBox {
+                                        spacing: 5px;
+                                        padding: 10px;
+                                        for dev in all_devices : CheckBox {
+                                            text: dev.description;
+                                            checked: dev.excluded;
+                                            toggled => {
+                                                toggle_device_exclusion(dev.name, self.checked);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -128,7 +202,7 @@ export component AppWindow inherits Window {
         Rectangle {
             background: #f0f0f0;
             border-radius: 4px;
-            height: 40px;
+            height: 35px;
             Text {
                 text: status;
                 color: #555;

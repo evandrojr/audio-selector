@@ -1,49 +1,60 @@
 use image::{Rgba, RgbaImage};
-use imageproc::drawing::{draw_filled_circle_mut, draw_filled_rect_mut, draw_hollow_circle_mut};
+use imageproc::drawing::{draw_filled_circle_mut, draw_filled_rect_mut};
 use imageproc::rect::Rect;
 
 fn main() {
     let size = 256;
     let mut img = RgbaImage::new(size, size);
     
-    // Background: Deep Blue Rounded Rect-ish
-    let bg_color = Rgba([30, 58, 138, 255]);
-    let accent_color = Rgba([255, 255, 255, 255]);
+    // Background: Modern Vibrant Gradient-ish
+    let dark_blue = Rgba([20, 20, 40, 255]);
+    let mid_blue = Rgba([40, 80, 200, 255]);
+    let white = Rgba([255, 255, 255, 255]);
     
-    // Fill background with a nice gradient or solid color
+    // Smooth circle background
     for x in 0..size {
         for y in 0..size {
-            img.put_pixel(x, y, bg_color);
+            let dx = x as i32 - 128;
+            let dy = y as i32 - 128;
+            if dx*dx + dy*dy < 120*120 {
+                img.put_pixel(x, y, mid_blue);
+            } else {
+                img.put_pixel(x, y, Rgba([0, 0, 0, 0])); // Transparent corners
+            }
         }
     }
 
-    // Draw stylized headphones
-    let center_x = (size / 2) as i32;
-    let center_y = (size / 2) as i32;
-    
-    // 1. Arc (Headband)
-    for i in 0..5 { // Thickness
-        draw_hollow_circle_mut(&mut img, (center_x, center_y + 20), 80 - i, accent_color);
+    let center_x = 128;
+    let center_y = 128;
+
+    // Stylized Headphones
+    // Headband
+    for r in 90..100 {
+        imageproc::drawing::draw_hollow_circle_mut(&mut img, (center_x, center_y + 10), r, white);
     }
+    // Cut bottom of headband
+    draw_filled_rect_mut(&mut img, Rect::at(0, center_y + 15).of_size(256, 128), mid_blue);
     
-    // Clear the bottom half of the circle to make it an arc
-    draw_filled_rect_mut(&mut img, Rect::at(0, center_y + 25).of_size(size, size / 2), bg_color);
+    // Re-fill transparent corners after rect draw
+    for x in 0..size {
+        for y in 0..size {
+            let dx = x as i32 - 128;
+            let dy = y as i32 - 128;
+            if dx*dx + dy*dy >= 120*120 {
+                img.put_pixel(x, y, Rgba([0, 0, 0, 0]));
+            }
+        }
+    }
 
-    // 2. Ear cups (Left and Right)
-    let cup_width = 45;
-    let cup_height = 70;
-    let corner_radius = 15;
+    // Ear pads
+    let pad_w = 40;
+    let pad_h = 70;
+    draw_filled_rect_mut(&mut img, Rect::at(center_x - 90, center_y - 10).of_size(pad_w, pad_h), white);
+    draw_filled_rect_mut(&mut img, Rect::at(center_x + 50, center_y - 10).of_size(pad_w, pad_h), white);
+
+    // Modern Play Triangle in center
+    draw_filled_circle_mut(&mut img, (center_x, center_y), 30, white);
+    draw_filled_circle_mut(&mut img, (center_x, center_y), 25, mid_blue);
     
-    // Left Cup
-    draw_filled_rect_mut(&mut img, Rect::at(center_x - 95, center_y - 10).of_size(cup_width as u32, cup_height as u32), accent_color);
-    // Right Cup
-    draw_filled_rect_mut(&mut img, Rect::at(center_x + 50, center_y - 10).of_size(cup_width as u32, cup_height as u32), accent_color);
-
-    // 3. Audio Waves / Signal (Minimalist)
-    draw_filled_circle_mut(&mut img, (center_x, center_y + 30), 8, accent_color);
-    draw_hollow_circle_mut(&mut img, (center_x, center_y + 30), 20, accent_color);
-    draw_hollow_circle_mut(&mut img, (center_x, center_y + 30), 35, accent_color);
-
     img.save("ui/assets/icon.png").expect("Failed to save icon");
-    println!("Custom icon generated at ui/assets/icon.png");
 }
