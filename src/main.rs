@@ -3,14 +3,17 @@ slint::include_modules!();
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use std::process::Command;
-use slint::{ModelRc, VecModel, SharedString, ComponentHandle, Model};
+use slint::{ModelRc, VecModel, SharedString, ComponentHandle};
 use std::rc::Rc;
 use std::fs;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use sys_locale::get_locale;
 use std::path::PathBuf;
-
+use tray_icon::{
+    menu::{Menu, MenuEvent, MenuItem},
+    TrayIconBuilder, Icon,
+};
 
 const CONFIG_FILE: &str = "config.json";
 
@@ -132,10 +135,20 @@ const IT: Translations = Translations {
     hide_unknown_bt: "Nascondi dispositivos Bluetooth sconosciuti (MAC)", bluetooth: "Bluetooth",
     unified: "Stesso dispositivo per ingresso/uscita", output: "Dispositivo di Uscita", input: "Dispositivo de Ingresso",
     audio_device: "Dispositivo Audio", refresh: "Aggiorna Dispositivi", status_ready: "Pronto",
-    status_applied: "Applicato", status_connecting: "Connessione Bluetooth...",
+    status_applied: "Aplicado", status_connecting: "Connessione Bluetooth...",
     filter_active: "Abilita Dispositivi Esclusi", exclude_instruction: "Seleziona i dispositivos qui sotto:",
     volume: "Volume", menu_quit: "Esci", open_logs: "Apri i Log dell'Applicazione",
 };
+
+fn get_current_translations() -> &'static Translations {
+    let loc = get_locale().unwrap_or_else(|| "en".to_string());
+    if loc.starts_with("pt") { &PT }
+    else if loc.starts_with("es") { &ES }
+    else if loc.starts_with("fr") { &FR }
+    else if loc.starts_with("de") { &DE }
+    else if loc.starts_with("it") { &IT }
+    else { &EN }
+}
 
 #[cfg(target_os = "linux")]
 fn get_pactl_devices(target: &str) -> anyhow::Result<Vec<PactlDevice>> {
@@ -224,6 +237,12 @@ fn install_app() -> anyhow::Result<()> {
     Ok(())
 }
 
+fn load_tray_icon() -> Icon {
+    let img = image::open("ui/assets/icon.png").expect("Failed icon open");
+    let img = image::imageops::resize(&img, 64, 64, image::imageops::FilterType::Lanczos3);
+    let (w, h) = img.dimensions(); Icon::from_rgba(img.into_raw(), w, h).expect("Failed tray icon")
+}
+
 use std::io::Read;
 fn get_log_content(search: &str) -> String {
     let path = dirs::home_dir().unwrap_or_default().join("audio-selector-debug.log");
@@ -248,27 +267,52 @@ fn main() -> anyhow::Result<()> {
     let config_data = load_config(); let ui = AppWindow::new()?;
     if let (Some(w), Some(h)) = (config_data.window_width, config_data.window_height) { ui.window().set_size(slint::PhysicalSize::new(w as u32, h as u32)); }
     if let (Some(x), Some(y)) = (config_data.window_x, config_data.window_y) { ui.window().set_position(slint::PhysicalPosition::new(x, y)); }
-    let ui_w = ui.as_weak(); let ui_h = Arc::new(Mutex::new(ui_w.clone()));
-    let loc = get_locale().unwrap_or_else(|| "en".to_string());
-    let t = if loc.starts_with("pt") { &PT } else if loc.starts_with("es") { &ES } else if loc.starts_with("fr") { &FR } else if loc.starts_with("de") { &DE } else if loc.starts_with("it") { &IT } else { &EN };
+    
+    let ui_weak = ui.as_weak();
+    let ui_handle = Arc::new(Mutex::new(ui_weak.clone()));
+    let t = get_current_translations();
+    
     ui.set_l_title(t.title.into()); ui.set_l_tab_devices(t.tab_devices.into()); ui.set_l_advanced_options(t.advanced_options.into()); ui.set_l_hide_unknown_bt(t.hide_unknown_bt.into()); ui.set_l_bluetooth(t.bluetooth.into()); ui.set_l_unified(t.unified.into()); ui.set_l_output(t.output.into()); ui.set_l_input(t.input.into()); ui.set_l_audio_device(t.audio_device.into()); ui.set_l_refresh(t.refresh.into()); ui.set_l_filter_active(t.filter_active.into()); ui.set_l_exclude_instruction(t.exclude_instruction.into()); ui.set_l_volume(t.volume.into()); ui.set_l_open_logs(t.open_logs.into());
     #[cfg(target_os = "linux")] ui.set_status(t.status_ready.into());
-    let cfg = Arc::new(Mutex::new(config_data));
-    { let c = cfg.lock().unwrap(); ui.set_unified_mode(c.unified_mode); ui.set_bluetooth_enabled(c.bluetooth_enabled); ui.set_filter_enabled(c.filter_enabled); ui.set_hide_unknown_bt(c.hide_unknown_bt); }
+    
+    let cfg_arc = Arc::new(Mutex::new(config_data));
+    {
+        let c = cfg_arc.lock().unwrap();
+        ui.set_unified_mode(c.unified_mode); ui.set_bluetooth_enabled(c.bluetooth_enabled);
+        ui.set_filter_enabled(c.filter_enabled); ui.set_hide_unknown_bt(c.hide_unknown_bt);
+    }
     if ui.get_bluetooth_enabled() { let _ = set_bluetooth_power(true); }
 
+    #[cfg(target_os = "linux")] { if gtk::init().is_ok() {
+        let menu = Menu::new(); let q_i = MenuItem::new(t.menu_quit, true, None); let q_id = q_i.id().clone(); let _ = menu.append_items(&[&q_i]);
+        if let Ok(icon) = TrayIconBuilder::new().with_menu(Box::new(menu)).with_tooltip(t.title).with_icon(load_tray_icon()).build() {
+            thread::spawn(move || { let m_c = MenuEvent::receiver(); loop { if let Ok(e) = m_c.recv() { if e.id == q_id { std::process::exit(0); } } } });
+            let u_i = ui_weak.clone(); thread::spawn(move || { let t_c = tray_icon::TrayIconEvent::receiver(); let ui_local = u_i.clone(); loop { if let Ok(e) = t_c.recv() { if let tray_icon::TrayIconEvent::Click { button: tray_icon::MouseButton::Left, .. } = e { let ui_inner = ui_local.clone(); let _ = slint::invoke_from_event_loop(move || { if let Some(uw) = ui_inner.upgrade() { uw.window().show().unwrap(); } }); } } } });
+            let _ = Box::leak(Box::new(icon));
+            let gtk_t = slint::Timer::default(); gtk_t.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(50), move || { while gtk::events_pending() { gtk::main_iteration_do(false); } });
+            Box::leak(Box::new(gtk_t));
+        }
+    }}
     ui.window().on_close_requested(|| { slint::CloseRequestResponse::HideWindow });
 
     ui.on_open_logs(move || { if let Ok(log_ui) = LogWindow::new() {
-        let lw = log_ui.as_weak(); let r_logs = move || { if let Some(ui) = lw.upgrade() { ui.set_log_text(get_log_content(&ui.get_log_search()).into()); } };
+        let lw = log_ui.as_weak(); let r_logs = move || { if let Some(u) = lw.upgrade() { u.set_log_text(get_log_content(&u.get_log_search()).into()); } };
         r_logs(); let r_logs_cb = r_logs.clone(); log_ui.on_refresh_logs(move || r_logs_cb());
         log_ui.show().unwrap(); Box::leak(Box::new(log_ui));
     }});
 
-    let s_cache = Arc::new(Mutex::new(Vec::<PactlDevice>::new())); let src_cache = Arc::new(Mutex::new(Vec::<PactlDevice>::new()));
-    let ui_ref = Arc::clone(&ui_h); let config_ref = Arc::clone(&cfg); let s_c_ref = Arc::clone(&s_cache); let src_c_ref = Arc::clone(&src_cache);
+    let s_cache = Arc::new(Mutex::new(Vec::<PactlDevice>::new())); 
+    let src_cache = Arc::new(Mutex::new(Vec::<PactlDevice>::new()));
+    let ui_ref_refresh = Arc::clone(&ui_handle); 
+    let config_ref_refresh = Arc::clone(&cfg_arc); 
+    let s_c_ref = Arc::clone(&s_cache); 
+    let src_c_ref = Arc::clone(&src_cache);
+    
     let refresh_fn = move || {
-        let u_w = ui_ref.lock().unwrap().clone(); let c = config_ref.lock().unwrap().clone(); let sc = Arc::clone(&s_c_ref); let srcc = Arc::clone(&src_c_ref);
+        let u_w = ui_ref_refresh.lock().unwrap().clone(); 
+        let c = config_ref_refresh.lock().unwrap().clone(); 
+        let sc = Arc::clone(&s_c_ref); 
+        let srcc = Arc::clone(&src_c_ref);
         thread::spawn(move || {
             append_log("Refresh triggered...");
             let bt = get_bluetooth_devices(); let mut rs = Vec::new(); if let Ok(s) = get_pactl_devices("sinks") { rs.extend(s); }
@@ -276,13 +320,15 @@ fn main() -> anyhow::Result<()> {
             let mut rsrc = Vec::new(); if let Ok(s) = get_pactl_devices("sources") { rsrc.extend(s); }
             for b in bt.iter() { let m = b.name.replace("bluez_connect.", "").replace(":", "_").to_lowercase(); if !rsrc.iter().any(|s| s.name.to_lowercase().contains(&m)) { rsrc.push(b.clone()); } }
             let h_u = c.hide_unknown_bt; let is_u = |desc: &str| { if !h_u { return false; } let d = desc.to_uppercase(); let b = d.replace(" (BLUETOOTH)", "").trim().to_string(); b.len() == 17 && (b.chars().filter(|c| *c == '-').count() == 5 || b.chars().filter(|c| *c == ':').count() == 5) };
-            let excl = c.excluded_devices.clone(); let f_e = c.filter_enabled;
+            let excl = c.excluded_devices.clone(); 
+            let f_e = c.filter_enabled;
             let fsinks: Vec<PactlDevice> = rs.into_iter().filter(|d| (!f_e || !excl.contains(&d.name)) && !is_u(&d.description)).collect();
-            let fsrcs: Vec<PactlDevice> = rsrc.into_iter().filter(|d| (!f_e || !excl.contains(&d.name)) && !is_u(&d.description)).collect(); let excl2 = excl.clone();
+            let fsrcs: Vec<PactlDevice> = rsrc.into_iter().filter(|d| (!f_e || !excl.contains(&d.name)) && !is_u(&d.description)).collect();
             let mut all_u: Vec<PactlDevice> = Vec::new(); for d in fsinks.iter().chain(fsrcs.iter()) { if !all_u.iter().any(|u| u.name == d.name) { all_u.push(d.clone()); } }
             let ls = c.last_sink.clone(); let lsrc = c.last_source.clone();
+            
             let _ = slint::invoke_from_event_loop(move || { if let Some(ui) = u_w.upgrade() {
-                ui.set_all_devices(ModelRc::from(Rc::new(VecModel::from(all_u.iter().map(|d| crate::DeviceToggle { name: d.name.clone().into(), description: d.description.clone().into(), excluded: excl2.contains(&d.name) }).collect::<Vec<_>>()))));
+                ui.set_all_devices(ModelRc::from(Rc::new(VecModel::from(all_u.iter().map(|d| crate::DeviceToggle { name: d.name.clone().into(), description: d.description.clone().into(), excluded: excl.contains(&d.name) }).collect::<Vec<_>>()))));
                 ui.set_sink_names(ModelRc::from(Rc::new(VecModel::from(fsinks.iter().map(|d| d.description.as_str().into()).collect::<Vec<SharedString>>()))));
                 if let Some(idx) = ls.and_then(|l| fsinks.iter().position(|s| s.name == l)) { ui.set_selected_sink_index(idx as i32); ui.set_sink_volume(fsinks[idx].get_volume_percent()); }
                 else if !fsinks.is_empty() { ui.set_selected_sink_index(0); ui.set_sink_volume(fsinks[0].get_volume_percent()); }
@@ -294,50 +340,54 @@ fn main() -> anyhow::Result<()> {
             }});
         });
     };
-    refresh_fn(); ui.on_refresh(refresh_fn.clone());
-    let c_bt = Arc::clone(&cfg); ui.on_toggle_bluetooth(move |on| { let _ = set_bluetooth_power(on); let mut c = c_bt.lock().unwrap(); c.bluetooth_enabled = on; save_config(&c); });
-    let c_uni = Arc::clone(&cfg); ui.on_toggle_unified(move |on| { let mut c = c_uni.lock().unwrap(); c.unified_mode = on; save_config(&c); });
-    let c_f = Arc::clone(&cfg); let r2 = refresh_fn.clone(); ui.on_toggle_filter(move |on| { { let mut c = c_f.lock().unwrap(); c.filter_enabled = on; save_config(&c); } r2(); });
-    let c_h = Arc::clone(&cfg); let r_h = refresh_fn.clone(); ui.on_toggle_hide_unknown_bt(move |on| { { let mut c = c_h.lock().unwrap(); c.hide_unknown_bt = on; save_config(&c); } r_h(); });
-    let c_e = Arc::clone(&cfg); let r_e = refresh_fn.clone(); ui.on_toggle_device_exclusion(move |n, e| { let ns = n.to_string(); { let mut c = c_e.lock().unwrap(); if e { if !c.excluded_devices.contains(&ns) { c.excluded_devices.push(ns); } } else { c.excluded_devices.retain(|x| x != &ns); } save_config(&c); } r_e(); });
-    let sc_c = Arc::clone(&s_cache); let src_c = Arc::clone(&src_cache); let c_c = Arc::clone(&cfg); let u_c = ui_h.clone();
+    
+    let r_init = refresh_fn.clone(); r_init(); ui.on_refresh(refresh_fn.clone());
+    let c_bt = Arc::clone(&cfg_arc); ui.on_toggle_bluetooth(move |on| { let _ = set_bluetooth_power(on); let mut c = c_bt.lock().unwrap(); c.bluetooth_enabled = on; save_config(&c); });
+    let c_uni = Arc::clone(&cfg_arc); ui.on_toggle_unified(move |on| { let mut c = c_uni.lock().unwrap(); c.unified_mode = on; save_config(&c); });
+    let c_f = Arc::clone(&cfg_arc); let r2 = refresh_fn.clone(); ui.on_toggle_filter(move |on| { { let mut c = c_f.lock().unwrap(); c.filter_enabled = on; save_config(&c); } r2(); });
+    let c_h = Arc::clone(&cfg_arc); let r_h = refresh_fn.clone(); ui.on_toggle_hide_unknown_bt(move |on| { { let mut c = c_h.lock().unwrap(); c.hide_unknown_bt = on; save_config(&c); } r_h(); });
+    let c_e = Arc::clone(&cfg_arc); let r_e = refresh_fn.clone(); ui.on_toggle_device_exclusion(move |n, e| { let ns = n.to_string(); { let mut c = c_e.lock().unwrap(); if e { if !c.excluded_devices.contains(&ns) { c.excluded_devices.push(ns); } } else { c.excluded_devices.retain(|x| x != &ns); } save_config(&c); } r_e(); });
+    
+    let sc_c = Arc::clone(&s_cache); let src_c = Arc::clone(&src_cache); let c_c = Arc::clone(&cfg_arc); let ui_h_handler = Arc::clone(&ui_handle);
     let handler = move |s_i: i32, src_i: i32| {
-        let u = u_c.lock().unwrap().clone().upgrade().unwrap(); let t = if get_locale().unwrap_or_default().starts_with("pt") { &PT } else { &EN };
+        let u_opt = ui_h_handler.lock().unwrap().upgrade();
+        if let Some(u) = u_opt {
         if s_i >= 0 {
             let sks = sc_c.lock().unwrap(); if (s_i as usize) < sks.len() {
-                let n = sks[s_i as usize].name.clone(); let u_a = u_c.lock().unwrap().clone(); let sr_a = Arc::clone(&src_c); let cf_a = Arc::clone(&c_c); let loc = get_locale().unwrap_or_default(); let u_a2 = u_a.clone(); let u_a3 = u_a.clone();
+                let n = sks[s_i as usize].name.clone(); let u_a = ui_h_handler.lock().unwrap().clone(); let sr_a = Arc::clone(&src_c); let cf_a = Arc::clone(&c_c);
                 u.set_sink_volume(sks[s_i as usize].get_volume_percent());
                 thread::spawn(move || {
-                    let ta = if loc.starts_with("pt") { &PT } else { &EN }; let mut an = n.clone();
+                    let ta = get_current_translations(); let mut an = n.clone();
                     if n.starts_with("bluez_connect.") {
-                        let mac = n.replace("bluez_connect.", ""); let _ = slint::invoke_from_event_loop(move || { u_a2.upgrade().unwrap().set_status(ta.status_connecting.into()); });
+                        let mac = n.replace("bluez_connect.", ""); let ui_conn = u_a.clone(); let _ = slint::invoke_from_event_loop(move || { if let Some(ua) = ui_conn.upgrade() { ua.set_status(ta.status_connecting.into()); } });
                         let _ = Command::new("bluetoothctl").args(["connect", &mac]).status(); thread::sleep(std::time::Duration::from_millis(2000));
                         if let Ok(p) = get_pactl_devices("sinks") { if let Some(f) = p.iter().find(|s| s.name.contains(&mac.replace(":", "_"))) { an = f.name.clone(); } }
                     }
                     let _ = apply_device_change("sinks", &an); let mut c = cf_a.lock().unwrap(); c.last_sink = Some(an.clone());
-                    if u_a.upgrade().unwrap().get_unified_mode() { let base = an.replace("bluez_sink", "").replace(".a2dp_sink", "").replace(".hifi", ""); let src = sr_a.lock().unwrap(); for s in src.iter() { if s.name.contains(&base) { let _ = apply_device_change("sources", &s.name); c.last_source = Some(s.name.clone()); break; } } }
-                    save_config(&c); let _ = slint::invoke_from_event_loop(move || { u_a3.upgrade().unwrap().set_status(format!("{} - {}", ta.status_applied, chrono::Local::now().format("%H:%M:%S")).into()); });
+                    let ui_uni = u_a.clone(); if let Some(ua) = ui_uni.upgrade() { if ua.get_unified_mode() { let base = an.replace("bluez_sink", "").replace(".a2dp_sink", "").replace(".hifi", ""); let src = sr_a.lock().unwrap(); for s in src.iter() { if s.name.contains(&base) { let _ = apply_device_change("sources", &s.name); c.last_source = Some(s.name.clone()); break; } } } }
+                    save_config(&c); let ui_final = u_a.clone(); let _ = slint::invoke_from_event_loop(move || { if let Some(ua) = ui_final.upgrade() { ua.set_status(format!("{} - {}", ta.status_applied, chrono::Local::now().format("%H:%M:%S")).into()); } });
                 });
             }
         }
         if !u.get_unified_mode() && src_i >= 0 {
             let srcs = src_c.lock().unwrap(); if (src_i as usize) < srcs.len() {
-                let n = srcs[src_i as usize].name.clone(); let cf_a = Arc::clone(&c_c); let u_a = u_c.lock().unwrap().clone(); let loc = get_locale().unwrap_or_default(); let u_a2 = u_a.clone();
+                let n = srcs[src_i as usize].name.clone(); let cf_a = Arc::clone(&c_c); let u_a = ui_h_handler.lock().unwrap().clone();
                 thread::spawn(move || {
-                    let ta = if loc.starts_with("pt") { &PT } else { &EN }; let mut an = n.clone();
+                    let ta = get_current_translations(); let mut an = n.clone();
                     if n.starts_with("bluez_connect.") {
-                        let mac = n.replace("bluez_connect.", ""); let _ = slint::invoke_from_event_loop(move || { u_a2.upgrade().unwrap().set_status(ta.status_connecting.into()); });
+                        let mac = n.replace("bluez_connect.", ""); let ui_conn = u_a.clone(); let _ = slint::invoke_from_event_loop(move || { if let Some(ua) = ui_conn.upgrade() { ua.set_status(ta.status_connecting.into()); } });
                         let _ = Command::new("bluetoothctl").args(["connect", &mac]).status(); thread::sleep(std::time::Duration::from_millis(2000));
                         if let Ok(p) = get_pactl_devices("sources") { if let Some(f) = p.iter().find(|s| s.name.contains(&mac.replace(":", "_"))) { an = f.name.clone(); } }
                     }
                     let _ = apply_device_change("sources", &an); let mut c = cf_a.lock().unwrap(); c.last_source = Some(an); save_config(&c);
-                    let _ = slint::invoke_from_event_loop(move || { u_a.upgrade().unwrap().set_status(format!("{} - {}", ta.status_applied, chrono::Local::now().format("%H:%M:%S")).into()); });
+                    let ui_final = u_a.clone(); let _ = slint::invoke_from_event_loop(move || { if let Some(ua) = ui_final.upgrade() { ua.set_status(format!("{} - {}", ta.status_applied, chrono::Local::now().format("%H:%M:%S")).into()); } });
                 });
             }
         }
+        }
     };
     let h1 = handler.clone(); ui.on_sink_changed(move |idx| h1(idx, -1)); let h2 = handler.clone(); ui.on_source_changed(move |idx| h2(-1, idx));
-    let s_vol = Arc::clone(&s_cache); let u_v = Arc::clone(&ui_h); ui.on_sink_volume_changed(move |v| { let u = u_v.lock().unwrap().upgrade().unwrap(); let idx = u.get_selected_sink_index(); if idx >= 0 { let s = s_vol.lock().unwrap(); if (idx as usize) < s.len() { let n = &s[idx as usize].name; if !n.starts_with("bluez_connect.") { let _ = set_sink_volume(n, v); } } } });
-    let win = ui.window(); let c_ex = Arc::clone(&cfg); ui.run()?;
+    let s_vol = Arc::clone(&s_cache); let ui_v_ref = Arc::clone(&ui_handle); ui.on_sink_volume_changed(move |v| { if let Some(u) = ui_v_ref.lock().unwrap().upgrade() { let idx = u.get_selected_sink_index(); if idx >= 0 { let s = s_vol.lock().unwrap(); if (idx as usize) < s.len() { let n = &s[idx as usize].name; if !n.starts_with("bluez_connect.") { let _ = set_sink_volume(n, v); } } } } });
+    let win = ui.window(); let c_ex = Arc::clone(&cfg_arc); ui.run()?;
     let mut c = c_ex.lock().unwrap(); let sz = win.size(); c.window_width = Some(sz.width as f32); c.window_height = Some(sz.height as f32); let p = win.position(); c.window_x = Some(p.x); c.window_y = Some(p.y); save_config(&c); Ok(())
 }
