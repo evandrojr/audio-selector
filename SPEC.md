@@ -6,28 +6,36 @@ A Rust-based desktop application using the Slint GUI framework to manage system 
 ## Features
 - **Real-time Audio Switching:**
   - **No Apply Button:** Device changes happen immediately when selected in the dropdown.
-  - **Force Move:** Uses `pactl move-sink-input` to force currently playing audio to the new device (e.g., HDMI, Bluetooth).
+  - **Force Move:** Uses `pactl move-sink-input` to force currently playing audio to the new device.
 - **Advanced Bluetooth Control:**
-  - **Auto Connection:** Lists paired (even if disconnected) Bluetooth devices. Selecting one attempts to `connect` via `bluetoothctl` and then switches audio to it.
-  - **Hide Unknown MACs:** Feature to filter out Bluetooth devices consisting of just MAC addresses.
+  - **Auto Connection:** Lists paired Bluetooth devices. Selecting one attempts to `connect` via `bluetoothctl`.
+  - **Hide Unknown MACs:** Filter out Bluetooth devices consisting of just MAC addresses.
 - **Advanced Options Tab:**
-  - **Excluded Devices:** A robust Checkbox list to hide unwanted outputs/inputs from the main dropdowns.
-- **Persistence & UI:**
+  - **Excluded Devices:** Robust Checkbox list to hide unwanted devices.
+- **Performance & Persistence:**
+  - **Device Caching:** Stores the last known device list in config. On startup, the UI displays cached devices immediately while a background scan updates the list.
   - **Config Path:** Configuration saved to `~/.config/audio-selector/config.json`.
   - **Window Memory:** Saves and loads position and dimensions.
-  - **Multi-language:** Supports 3 languages based on system locale (EN, PT, ES, FR, DE, IT).
+  - **Multi-language:** Supports EN, PT, ES, FR, DE, IT.
 - **Debugging:**
-  - **Separate Log Window:** Searchable diagnostic window for troubleshooting (logs saved to `~/.config/audio-selector/debug.log`).
+  - **Separate Log Window:** Searchable diagnostic window (logs saved to `~/.config/audio-selector/debug.log`).
+
+## Architecture
+The application is modularized for better maintainability:
+- `audio`: Handles `pactl` commands and device parsing.
+- `bluetooth`: Manages `bluetoothctl` integration.
+- `config`: Handles JSON persistence and device caching.
+- `i18n`: Manages multi-language translations.
+- `utils`: Shared utility functions (logging, paths).
 
 ## Technical Stack
 - **GUI:** Slint 1.8.0.
-- **System Backend:** `pactl` (PulseAudio/PipeWire) and `bluetoothctl`.
-- **System Integration:** `dirs`, `sys-locale`.
-- **Logging:** File-based logging to `~/.config/audio-selector/debug.log`.
+- **System Backend:** `pactl` and `bluetoothctl`.
+- **Persistence:** `serde` / `serde_json`.
 
 ## Installation & Autostart
-Run the binary with the `-install` flag to copy the app to your `PATH` and set it to start with your window manager:
+Run with the `-install` flag:
 ```bash
 ./audio-selector -install
 ```
-This automatically handles `.desktop` files in `~/.local/share/applications` and `~/.config/autostart/`.
+This handles `.desktop` files and icon caching.
