@@ -38,18 +38,18 @@ fn install_app() -> anyhow::Result<()> {
     let target_icon = icon_dir.join("audio-selector.png");
     if PathBuf::from("ui/assets/icon.png").exists() { let _ = fs::copy("ui/assets/icon.png", &target_icon); }
     
-    let desktop = format!(
-        "[Desktop Entry]\nType=Application\nName=Audio Selector\nExec={}\nIcon={}\nTerminal=false\nCategories=AudioVideo;Audio;Utility;\nStartupNotify=true",
-        target_bin.to_string_lossy(),
+    let desktop_base = format!(
+        "[Desktop Entry]\nType=Application\nName=Audio Selector\nIcon={}\nTerminal=false\nCategories=AudioVideo;Audio;Utility;\nStartupNotify=true",
         target_icon.to_string_lossy()
     );
+    
     let app_dir = home.join(".local").join("share").join("applications");
     if !app_dir.exists() { fs::create_dir_all(&app_dir)?; }
-    fs::write(app_dir.join("audio-selector.desktop"), &desktop)?;
+    fs::write(app_dir.join("audio-selector.desktop"), format!("{}\nExec={}", desktop_base, target_bin.to_string_lossy()))?;
     
     let autostart = home.join(".config").join("autostart");
     if !autostart.exists() { fs::create_dir_all(&autostart)?; }
-    fs::write(autostart.join("audio-selector.desktop"), &desktop)?;
+    fs::write(autostart.join("audio-selector.desktop"), format!("{}\nExec={} --tray", desktop_base, target_bin.to_string_lossy()))?;
     Ok(())
 }
 
@@ -119,9 +119,11 @@ fn update_ui_models(ui: &AppWindow, sinks: &[PactlDevice], sources: &[PactlDevic
 
 fn main() -> anyhow::Result<()> {
     append_log("Main started.");
-    if std::env::args().any(|x| x == "-install") { 
+    let args: Vec<String> = std::env::args().collect();
+    if args.iter().any(|x| x == "-install") { 
         return install_app(); 
     }
+    let start_in_tray = args.iter().any(|x| x == "--tray");
     
     let config_data = load_config();
     let ui = AppWindow::new()?;
@@ -434,6 +436,12 @@ fn main() -> anyhow::Result<()> {
     });
 
     append_log("Starting Slint event loop...");
+    if !start_in_tray {
+        ui.window().show().unwrap();
+    } else {
+        append_log("Started in tray mode.");
+    }
+    
     ui.run()?;
     
     append_log("Application closing...");
