@@ -120,14 +120,10 @@ fn update_ui_models(ui: &AppWindow, sinks: &[PactlDevice], sources: &[PactlDevic
 fn main() -> anyhow::Result<()> {
     append_log("Main started.");
     if std::env::args().any(|x| x == "-install") { 
-        append_log("Installing app...");
         return install_app(); 
     }
     
-    append_log("Loading config...");
     let config_data = load_config();
-    
-    append_log("Creating Window...");
     let ui = AppWindow::new()?;
     let ui_weak = ui.as_weak();
     
@@ -138,7 +134,6 @@ fn main() -> anyhow::Result<()> {
         ui.window().set_position(slint::PhysicalPosition::new(x, y));
     }
     
-    append_log("Setting translations...");
     let t = get_current_translations();
     ui.set_l_title(t.title.into());
     ui.set_l_tab_devices(t.tab_devices.into());
@@ -165,7 +160,6 @@ fn main() -> anyhow::Result<()> {
         ui.set_hide_unknown_bt(c.hide_unknown_bt);
         
         if !c.cached_sinks.is_empty() || !c.cached_sources.is_empty() {
-            append_log("Loading cached devices...");
             let cached_sinks: Vec<PactlDevice> = c.cached_sinks.iter().map(|d| PactlDevice {
                 name: d.name.clone(),
                 description: d.description.clone(),
@@ -181,48 +175,40 @@ fn main() -> anyhow::Result<()> {
     }
 
     if ui.get_bluetooth_enabled() {
-        append_log("Bluetooth auto-power scheduled.");
         thread::spawn(|| { let _ = set_bluetooth_power(true); });
     }
 
     #[cfg(target_os = "linux")] {
-        append_log("Tray setup starting...");
-        let ui_weak_tray = ui_weak.clone();
-        let tray_title = t.title;
-        let menu_quit_text = t.menu_quit;
-        thread::spawn(move || {
-            append_log("GTK init in thread...");
-            if gtk::init().is_ok() {
-                let menu = Menu::new();
-                let q_i = MenuItem::new(menu_quit_text, true, None);
-                let q_id = q_i.id().clone();
-                let _ = menu.append_items(&[&q_i]);
-                if let Ok(icon) = TrayIconBuilder::new().with_menu(Box::new(menu)).with_tooltip(tray_title).with_icon(load_tray_icon()).build() {
-                    append_log("Tray icon built.");
-                    thread::spawn(move || {
-                        let m_c = tray_icon::menu::MenuEvent::receiver();
-                        loop { if let Ok(e) = m_c.recv() { if e.id == q_id { std::process::exit(0); } } }
-                    });
-                    let u_i = ui_weak_tray.clone();
-                    thread::spawn(move || {
-                        let t_c = tray_icon::TrayIconEvent::receiver();
-                        loop {
-                            if let Ok(e) = t_c.recv() {
-                                if let tray_icon::TrayIconEvent::Click { button: tray_icon::MouseButton::Left, .. } = e {
-                                    let ui_inner = u_i.clone();
-                                    let _ = slint::invoke_from_event_loop(move || { if let Some(uw) = ui_inner.upgrade() { uw.window().show().unwrap(); } });
-                                }
+        if gtk::init().is_ok() {
+            let menu = Menu::new();
+            let q_i = MenuItem::new(t.menu_quit, true, None);
+            let q_id = q_i.id().clone();
+            let _ = menu.append_items(&[&q_i]);
+            if let Ok(icon) = TrayIconBuilder::new().with_menu(Box::new(menu)).with_tooltip(t.title).with_icon(load_tray_icon()).build() {
+                thread::spawn(move || {
+                    let m_c = tray_icon::menu::MenuEvent::receiver();
+                    loop { if let Ok(e) = m_c.recv() { if e.id == q_id { std::process::exit(0); } } }
+                });
+                let u_i = ui_weak.clone();
+                thread::spawn(move || {
+                    let t_c = tray_icon::TrayIconEvent::receiver();
+                    loop {
+                        if let Ok(e) = t_c.recv() {
+                            if let tray_icon::TrayIconEvent::Click { button: tray_icon::MouseButton::Left, .. } = e {
+                                let ui_inner = u_i.clone();
+                                let _ = slint::invoke_from_event_loop(move || { if let Some(uw) = ui_inner.upgrade() { uw.window().show().unwrap(); } });
                             }
                         }
-                    });
-                    let _ = Box::leak(Box::new(icon));
-                    loop { 
-                        if gtk::events_pending() { gtk::main_iteration_do(false); }
-                        thread::sleep(std::time::Duration::from_millis(50));
                     }
-                }
+                });
+                let _ = Box::leak(Box::new(icon));
+                let gtk_t = slint::Timer::default();
+                gtk_t.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(50), move || { 
+                    while gtk::events_pending() { gtk::main_iteration_do(false); }
+                });
+                Box::leak(Box::new(gtk_t));
             }
-        });
+        }
     }
 
     ui.window().on_close_requested(|| { slint::CloseRequestResponse::HideWindow });
@@ -296,7 +282,7 @@ fn main() -> anyhow::Result<()> {
     };
     
     let r_init = refresh_fn.clone();
-    slint::Timer::single_shot(std::time::Duration::from_millis(500), move || { r_init(); });
+    slint::Timer::single_shot(std::time::Duration::from_millis(100), move || { r_init(); });
     ui.on_refresh(refresh_fn.clone());
 
     let c_bt = Arc::clone(&cfg_arc);
