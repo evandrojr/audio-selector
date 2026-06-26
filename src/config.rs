@@ -1,9 +1,21 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::sync::Mutex;
+use std::sync::mpsc::{channel, Sender};
+use std::sync::OnceLock;
 use crate::utils::get_config_path;
 
-static WRITE_LOCK: Mutex<()> = Mutex::new(());
+fn write_queue() -> &'static Sender<String> {
+    static QUEUE: OnceLock<Sender<String>> = OnceLock::new();
+    QUEUE.get_or_init(|| {
+        let (tx, rx) = channel::<String>();
+        std::thread::spawn(move || {
+            for data in rx {
+                let _ = fs::write(get_config_path(), &data);
+            }
+        });
+        tx
+    })
+}
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 #[serde(default)]
@@ -40,8 +52,6 @@ pub fn load_config() -> Config {
 
 pub fn save_config(config: &Config) {
     if let Ok(c) = serde_json::to_string_pretty(config) {
-        if let Ok(_lock) = WRITE_LOCK.try_lock() {
-            let _ = fs::write(get_config_path(), c);
-        }
+        let _ = write_queue().send(c);
     }
 }
