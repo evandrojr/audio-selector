@@ -9,6 +9,7 @@ A Rust-based desktop application using the Slint GUI framework to manage system 
   - **Force Move:** Uses `pactl move-sink-input` to force currently playing audio to the new device.
 - **Advanced Bluetooth Control:**
   - **Auto Connection:** Lists paired Bluetooth devices. Selecting one attempts to `connect` via `bluetoothctl`.
+  - **Non-blocking Power Toggle:** Bluetooth power commands run in a background thread to prevent UI freezes.
   - **Hide Unknown MACs:** Filter out Bluetooth devices consisting of just MAC addresses.
 - **Advanced Options Tab:**
   - **Excluded Devices:** Robust Checkbox list to hide unwanted devices.

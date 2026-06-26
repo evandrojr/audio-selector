@@ -173,7 +173,7 @@ fn main() -> anyhow::Result<()> {
         update_ui_models(&ui, &cached_sinks, &cached_sources, &c);
     }
 
-    if ui.get_bluetooth_enabled() { let _ = set_bluetooth_power(true); }
+    if ui.get_bluetooth_enabled() { thread::spawn(move || { let _ = set_bluetooth_power(true); }); }
 
     #[cfg(target_os = "linux")] {
         if gtk::init().is_ok() {
@@ -283,10 +283,13 @@ fn main() -> anyhow::Result<()> {
 
     let c_bt = Arc::clone(&cfg_arc);
     ui.on_toggle_bluetooth(move |on| {
-        let _ = set_bluetooth_power(on);
-        let mut c = c_bt.lock().unwrap();
-        c.bluetooth_enabled = on;
-        save_config(&c);
+        let c = c_bt.clone();
+        thread::spawn(move || {
+            let _ = set_bluetooth_power(on);
+            let mut cfg = c.lock().unwrap();
+            cfg.bluetooth_enabled = on;
+            save_config(&cfg);
+        });
     });
 
     let c_uni = Arc::clone(&cfg_arc);
