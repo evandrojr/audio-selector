@@ -118,9 +118,7 @@ fn update_ui_models(ui: &AppWindow, sinks: &[PactlDevice], sources: &[PactlDevic
 }
 
 fn main() -> anyhow::Result<()> {
-    let start_time = std::time::Instant::now();
     append_log(">>> APP START");
-    
     let args: Vec<String> = std::env::args().collect();
     if args.iter().any(|x| x == "-install") { 
         return install_app(); 
@@ -128,11 +126,13 @@ fn main() -> anyhow::Result<()> {
     let start_in_tray = args.iter().any(|x| x == "--tray");
     
     let config_data = load_config();
-    append_log(&format!("Step 1: Config Load Done ({:?})", start_time.elapsed()));
-    
     let ui = AppWindow::new()?;
     let ui_weak = ui.as_weak();
-    append_log(&format!("Step 2: UI Creation Done ({:?})", start_time.elapsed()));
+    
+    // VISUAL FEEDBACK: Show window ASAP
+    if !start_in_tray {
+        ui.window().show().unwrap();
+    }
     
     if let (Some(w), Some(h)) = (config_data.window_width, config_data.window_height) {
         ui.window().set_size(slint::PhysicalSize::new(w as u32, h as u32));
@@ -157,7 +157,6 @@ fn main() -> anyhow::Result<()> {
     ui.set_l_volume(t.volume.into());
     ui.set_l_open_logs(t.open_logs.into());
     #[cfg(target_os = "linux")] ui.set_status(t.status_ready.into());
-    append_log(&format!("Step 3: UI Setup Done ({:?})", start_time.elapsed()));
     
     let cfg_arc = Arc::new(Mutex::new(config_data.clone()));
     {
@@ -181,23 +180,18 @@ fn main() -> anyhow::Result<()> {
             update_ui_models(&ui, &cached_sinks, &cached_sources, &c);
         }
     }
-    append_log(&format!("Step 4: Load Cache Done ({:?})", start_time.elapsed()));
 
     #[cfg(target_os = "linux")] {
         let ui_weak_tray = ui_weak.clone();
         let tray_title = t.title.to_string();
         let menu_quit_text = t.menu_quit.to_string();
         
-        // Move GTK/Tray Init to a thread to avoid blocking main window display
         thread::spawn(move || {
-            append_log("Background: GTK init starting...");
             if gtk::init().is_ok() {
                 let menu = Menu::new();
                 let q_i = MenuItem::new(&menu_quit_text, true, None);
                 let q_id = q_i.id().clone();
                 let _ = menu.append_items(&[&q_i]);
-                
-                // Pre-load icon before builder
                 let icon_res = load_tray_icon();
                 
                 if let Ok(icon) = TrayIconBuilder::new()
@@ -205,7 +199,6 @@ fn main() -> anyhow::Result<()> {
                     .with_tooltip(&tray_title)
                     .with_icon(icon_res)
                     .build() {
-                    append_log("Background: Tray icon built.");
                     
                     let m_c = tray_icon::menu::MenuEvent::receiver();
                     thread::spawn(move || {
@@ -306,7 +299,7 @@ fn main() -> anyhow::Result<()> {
     };
     
     let r_init = refresh_fn.clone();
-    slint::Timer::single_shot(std::time::Duration::from_millis(500), move || { r_init(); });
+    slint::Timer::single_shot(std::time::Duration::from_millis(100), move || { r_init(); });
     ui.on_refresh(refresh_fn.clone());
 
     let c_bt = Arc::clone(&cfg_arc);
@@ -457,14 +450,8 @@ fn main() -> anyhow::Result<()> {
         }
     });
 
-    append_log(&format!("Step 5: Final run call ({:?})", start_time.elapsed()));
-    if !start_in_tray {
-        ui.window().show().unwrap();
-    }
-    
     ui.run()?;
     
-    append_log("Application closing...");
     let mut c = cfg_arc.lock().unwrap();
     let sz = ui.window().size();
     c.window_width = Some(sz.width as f32);
@@ -473,6 +460,5 @@ fn main() -> anyhow::Result<()> {
     c.window_x = Some(p.x);
     c.window_y = Some(p.y);
     save_config(&c);
-    append_log("Shutdown complete.");
     Ok(())
 }
