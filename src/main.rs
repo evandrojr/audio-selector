@@ -3,7 +3,7 @@ slint::include_modules!();
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use std::process::Command;
-use slint::{ModelRc, VecModel, SharedString, ComponentHandle};
+use slint::{ModelRc, VecModel, SharedString, ComponentHandle, Model};
 use std::rc::Rc;
 use std::fs;
 use std::sync::{Arc, Mutex};
@@ -238,9 +238,9 @@ fn install_app() -> anyhow::Result<()> {
 }
 
 fn load_tray_icon() -> Icon {
-    let img = image::open("ui/assets/icon.png").expect("Failed icon open");
+    let img = image::open("ui/assets/icon.png").expect("No icon");
     let img = image::imageops::resize(&img, 64, 64, image::imageops::FilterType::Lanczos3);
-    let (w, h) = img.dimensions(); Icon::from_rgba(img.into_raw(), w, h).expect("Failed tray icon")
+    let (w, h) = img.dimensions(); Icon::from_rgba(img.into_raw(), w, h).expect("Tray icon fail")
 }
 
 use std::io::Read;
@@ -342,6 +342,7 @@ fn main() -> anyhow::Result<()> {
     };
     
     let r_init = refresh_fn.clone(); r_init(); ui.on_refresh(refresh_fn.clone());
+
     let c_bt = Arc::clone(&cfg_arc); ui.on_toggle_bluetooth(move |on| { let _ = set_bluetooth_power(on); let mut c = c_bt.lock().unwrap(); c.bluetooth_enabled = on; save_config(&c); });
     let c_uni = Arc::clone(&cfg_arc); ui.on_toggle_unified(move |on| { let mut c = c_uni.lock().unwrap(); c.unified_mode = on; save_config(&c); });
     let c_f = Arc::clone(&cfg_arc); let r2 = refresh_fn.clone(); ui.on_toggle_filter(move |on| { { let mut c = c_f.lock().unwrap(); c.filter_enabled = on; save_config(&c); } r2(); });
