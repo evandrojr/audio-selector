@@ -39,9 +39,9 @@ pub fn load_config() -> Config {
 }
 
 pub fn save_config(config: &Config) {
-    let serialized = serde_json::to_string_pretty(config);
-    if let Ok(c) = serialized {
-        let _lock = WRITE_LOCK.lock().unwrap();
-        let _ = fs::write(get_config_path(), c);
+    if let Ok(c) = serde_json::to_string_pretty(config) {
+        if let Ok(_lock) = WRITE_LOCK.try_lock() {
+            let _ = fs::write(get_config_path(), c);
+        }
     }
 }
