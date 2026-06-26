@@ -14,7 +14,6 @@ use std::rc::Rc;
 use std::fs;
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::path::PathBuf;
 #[cfg(target_os = "linux")]
 use tray_icon::{
     menu::{Menu, MenuItem},
