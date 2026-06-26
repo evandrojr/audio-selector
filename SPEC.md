@@ -22,6 +22,11 @@ A Rust-based desktop application using the Slint GUI framework to manage system 
   - **Separate Log Window:** Searchable diagnostic window (logs saved to `~/.config/audio-selector/debug.log`).
 - **System Tray:**
   - **GTK Backend:** Uses `tray-icon` crate with GTK/libappindicator. Falls back gracefully if unavailable.
+  - **Click to Show:** Left-click on tray icon restores the application window via `gtk::main()`.
+- **Bluetooth Control:**
+  - **BT Disable Hides Devices:** When Bluetooth is disabled, all `bluez_connect.*` devices are filtered out from the device list on refresh.
+- **Configuration:**
+  - **Instant Saves:** Config is saved immediately on every change with no debounce delay.
 
 ## Architecture
 The application is modularized for better maintainability:

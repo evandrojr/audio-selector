@@ -201,12 +201,12 @@ fn main() -> anyhow::Result<()> {
                 name: d.name.clone(),
                 description: d.description.clone(),
                 volume: Some(serde_json::json!({"0": {"value_percent": format!("{}%", d.volume_percent)}}))
-            }).collect();
+            }).filter(|d| c.bluetooth_enabled || !d.name.contains("bluez_connect.")).collect();
             let cached_sources: Vec<PactlDevice> = c.cached_sources.iter().map(|d| PactlDevice {
                 name: d.name.clone(),
                 description: d.description.clone(),
                 volume: None
-            }).collect();
+            }).filter(|d| c.bluetooth_enabled || !d.name.contains("bluez_connect.")).collect();
             update_ui_models(&ui, &cached_sinks, &cached_sources, &c);
         }
     }
@@ -252,10 +252,7 @@ fn main() -> anyhow::Result<()> {
                     });
 
                     let _ = Box::leak(Box::new(icon));
-                    loop {
-                        while gtk::events_pending() { gtk::main_iteration_do(false); }
-                        thread::sleep(std::time::Duration::from_millis(50));
-                    }
+                    gtk::main();
                 }
             }
         });
@@ -314,22 +311,28 @@ fn main() -> anyhow::Result<()> {
             let _ = slint::invoke_from_event_loop(move || {
                 if let Some(ui) = u_w.upgrade() {
                     let mut c = cfg_locked.lock().unwrap();
-                    if !rs_c.is_empty() || !rsrc_c.is_empty() {
-                        update_ui_models(&ui, &rs_c, &rsrc_c, &c);
-                        c.cached_sinks = rs_c.iter().map(|d| CachedDevice {
+                    let mut final_sinks = rs_c.clone();
+                    let mut final_sources = rsrc_c.clone();
+                    if !c.bluetooth_enabled {
+                        final_sinks.retain(|d| !d.name.contains("bluez_connect."));
+                        final_sources.retain(|d| !d.name.contains("bluez_connect."));
+                    }
+                    if !final_sinks.is_empty() || !final_sources.is_empty() {
+                        update_ui_models(&ui, &final_sinks, &final_sources, &c);
+                        c.cached_sinks = final_sinks.iter().map(|d| CachedDevice {
                             name: d.name.clone(),
                             description: d.description.clone(),
                             volume_percent: d.get_volume_percent(),
                         }).collect();
-                        c.cached_sources = rsrc_c.iter().map(|d| CachedDevice {
+                        c.cached_sources = final_sources.iter().map(|d| CachedDevice {
                             name: d.name.clone(),
                             description: d.description.clone(),
                             volume_percent: 0,
                         }).collect();
                         save_config(&c);
                     }
-                    *sc.lock().unwrap() = rs_c;
-                    *srcc.lock().unwrap() = rsrc_c;
+                    *sc.lock().unwrap() = final_sinks;
+                    *srcc.lock().unwrap() = final_sources;
                     append_log("Scan: Completed and UI updated.");
                 }
             });
