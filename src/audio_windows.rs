@@ -219,7 +219,7 @@ fn ensure_helper() -> anyhow::Result<PathBuf> {
         return Ok(HELPER_PATH.lock().unwrap().clone().unwrap());
     }
     let exe = compile_helper()?;
-    HELPER_PATH.lock().unwrap() = Some(exe.clone());
+    *HELPER_PATH.lock().unwrap() = Some(exe.clone());
     *compiled = true;
     Ok(exe)
 }

@@ -211,53 +211,55 @@ fn main() -> anyhow::Result<()> {
         }
     }
 
-    let ui_weak_tray = ui_weak.clone();
-    let tray_title = t.title.to_string();
-    let menu_quit_text = t.menu_quit.to_string();
-
     #[cfg(target_os = "linux")]
-    thread::spawn(move || {
-        append_log("Initializing system tray in background...");
-        if gtk::init().is_ok() {
-            let menu = Menu::new();
-            let q_i = MenuItem::new(&menu_quit_text, true, None);
-            let q_id = q_i.id().clone();
-            let _ = menu.append_items(&[&q_i]);
-            let icon_res = load_tray_icon();
+    {
+        let ui_weak_tray = ui_weak.clone();
+        let tray_title = t.title.to_string();
+        let menu_quit_text = t.menu_quit.to_string();
 
-            if let Ok(icon) = TrayIconBuilder::new()
-                .with_menu(Box::new(menu))
-                .with_tooltip(&tray_title)
-                .with_icon(icon_res)
-                .build() {
+        thread::spawn(move || {
+            append_log("Initializing system tray in background...");
+            if gtk::init().is_ok() {
+                let menu = Menu::new();
+                let q_i = MenuItem::new(&menu_quit_text, true, None);
+                let q_id = q_i.id().clone();
+                let _ = menu.append_items(&[&q_i]);
+                let icon_res = load_tray_icon();
 
-                append_log("Tray icon created successfully.");
-                let m_c = tray_icon::menu::MenuEvent::receiver();
-                thread::spawn(move || {
-                    loop { if let Ok(e) = m_c.recv() { if e.id == q_id { std::process::exit(0); } } }
-                });
+                if let Ok(icon) = TrayIconBuilder::new()
+                    .with_menu(Box::new(menu))
+                    .with_tooltip(&tray_title)
+                    .with_icon(icon_res)
+                    .build() {
 
-                let t_c = tray_icon::TrayIconEvent::receiver();
-                let u_i = ui_weak_tray.clone();
-                thread::spawn(move || {
-                    loop {
-                        if let Ok(e) = t_c.recv() {
-                            if let tray_icon::TrayIconEvent::Click { button: tray_icon::MouseButton::Left, .. } = e {
-                                let ui_inner = u_i.clone();
-                                let _ = slint::invoke_from_event_loop(move || { if let Some(uw) = ui_inner.upgrade() { uw.window().show().unwrap(); } });
+                    append_log("Tray icon created successfully.");
+                    let m_c = tray_icon::menu::MenuEvent::receiver();
+                    thread::spawn(move || {
+                        loop { if let Ok(e) = m_c.recv() { if e.id == q_id { std::process::exit(0); } } }
+                    });
+
+                    let t_c = tray_icon::TrayIconEvent::receiver();
+                    let u_i = ui_weak_tray.clone();
+                    thread::spawn(move || {
+                        loop {
+                            if let Ok(e) = t_c.recv() {
+                                if let tray_icon::TrayIconEvent::Click { button: tray_icon::MouseButton::Left, .. } = e {
+                                    let ui_inner = u_i.clone();
+                                    let _ = slint::invoke_from_event_loop(move || { if let Some(uw) = ui_inner.upgrade() { uw.window().show().unwrap(); } });
+                                }
                             }
                         }
-                    }
-                });
+                    });
 
-                let _ = Box::leak(Box::new(icon));
-                loop {
-                    while gtk::events_pending() { gtk::main_iteration_do(false); }
-                    thread::sleep(std::time::Duration::from_millis(50));
+                    let _ = Box::leak(Box::new(icon));
+                    loop {
+                        while gtk::events_pending() { gtk::main_iteration_do(false); }
+                        thread::sleep(std::time::Duration::from_millis(50));
+                    }
                 }
             }
-        }
-    });
+        });
+    }
 
     #[cfg(not(target_os = "linux"))]
     thread::spawn(move || {
