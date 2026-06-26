@@ -57,7 +57,7 @@ fn load_tray_icon() -> Option<tray_icon::Icon> {
     let img_bytes = include_bytes!("../ui/assets/icon.png");
     match image::load_from_memory(img_bytes) {
         Ok(img) => {
-            let img = image::imageops::resize(&img, 64, 64, image::imageops::FilterType::Nearest);
+            let img = image::imageops::resize(&img, 48, 48, image::imageops::FilterType::Lanczos3);
             let (w, h) = img.dimensions();
             match tray_icon::Icon::from_rgba(img.into_raw(), w, h) {
                 Ok(icon) => Some(icon),

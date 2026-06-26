@@ -169,6 +169,50 @@ section .section-desc {
   font-size: 0.95rem;
 }
 
+/* Screenshots */
+#screenshots {
+  background: #fff;
+}
+
+.screenshots-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 32px;
+  max-width: 900px;
+  margin: 0 auto;
+}
+
+.screenshot-card {
+  background: #f8f9fa;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.screenshot-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 8px 30px rgba(0,0,0,0.12);
+}
+
+.screenshot-card a {
+  display: block;
+}
+
+.screenshot-card img {
+  width: 100%;
+  height: auto;
+  display: block;
+  border-bottom: 1px solid #e9ecef;
+}
+
+.screenshot-card p {
+  padding: 16px 20px;
+  color: #6c757d;
+  font-size: 0.9rem;
+  margin: 0;
+}
+
 /* Installation */
 #install {
   background: #fff;
@@ -289,4 +333,5 @@ footer a:hover {
   header h1 { font-size: 2rem; }
   section { padding: 50px 0; }
   .features-grid { grid-template-columns: 1fr; }
+  .screenshots-grid { grid-template-columns: 1fr; }
 }
