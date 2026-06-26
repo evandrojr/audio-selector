@@ -1,9 +1,12 @@
 # Audio Selector
 
-A modern, fast, and lightweight audio device switcher written in Rust with a Slint GUI. Designed to handle system audio inputs and outputs with a focus on Bluetooth device management.
-
+[![Website](https://img.shields.io/badge/website-audio--selector-blue.svg)](https://evandrojr.github.io/audio-selector/)
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20Windows-lightgrey.svg)
+
+> **[Visit the project page](https://evandrojr.github.io/audio-selector/)** — screenshots, features, and download links.
+
+A modern, fast, and lightweight audio device switcher written in Rust with a Slint GUI. Designed to handle system audio inputs and outputs with a focus on Bluetooth device management.
 
 ## Features
 
