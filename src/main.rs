@@ -394,9 +394,21 @@ fn install_app() -> anyhow::Result<()> {
 }
 
 fn main() -> anyhow::Result<()> {
-    if std::env::args().any(|x| x == "-install") { return install_app(); }
+    let log_path = dirs::home_dir().unwrap_or_default().join("audio-selector-debug.log");
+    let _ = fs::write(&log_path, "Starting Audio Selector...\n");
+
+    if std::env::args().any(|x| x == "-install") { 
+        let _ = fs::write(&log_path, "Running installer...\n");
+        return install_app(); 
+    }
+    
+    let _ = fs::write(&log_path, "Loading config...\n");
     let config_data = load_config();
+    
+    let _ = fs::write(&log_path, "Building UI...\n");
     let ui = AppWindow::new()?;
+    
+    let _ = fs::write(&log_path, "Applying geometry...\n");
     if let (Some(w), Some(h)) = (config_data.window_width, config_data.window_height) { ui.window().set_size(slint::PhysicalSize::new(w as u32, h as u32)); }
     if let (Some(x), Some(y)) = (config_data.window_x, config_data.window_y) { ui.window().set_position(slint::PhysicalPosition::new(x, y)); }
     let ui_weak = ui.as_weak();
