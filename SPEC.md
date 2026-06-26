@@ -21,7 +21,7 @@ A Rust-based desktop application using the Slint GUI framework to manage system 
 - **Debugging:**
   - **Separate Log Window:** Searchable diagnostic window (logs saved to `~/.config/audio-selector/debug.log`).
 - **System Tray:**
-  - **Multi-backend:** Uses `tray-icon` crate with GTK + libappindicator + libxdo backends. Works across GNOME, KDE, and other WMs.
+  - **GTK Backend:** Uses `tray-icon` crate with GTK/libappindicator. Falls back gracefully if unavailable.
 
 ## Architecture
 The application is modularized for better maintainability:
