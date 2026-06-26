@@ -3,12 +3,13 @@ slint::include_modules!();
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use std::process::Command;
-use slint::{ModelRc, VecModel, SharedString, Model, ComponentHandle};
+use slint::{ModelRc, VecModel, SharedString, ComponentHandle};
 use std::rc::Rc;
 use std::fs;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use sys_locale::get_locale;
+use std::path::PathBuf;
 
 const CONFIG_FILE: &str = "config.json";
 
@@ -22,6 +23,8 @@ struct Config {
     window_height: Option<f32>,
     window_x: Option<i32>,
     window_y: Option<i32>,
+    filter_enabled: bool,
+    filter_words: String,
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -44,6 +47,8 @@ struct Translations {
     status_applied: &'static str,
     status_error: &'static str,
     status_connecting: &'static str,
+    filter_active: &'static str,
+    filter_words: &'static str,
 }
 
 const EN: Translations = Translations {
@@ -60,6 +65,8 @@ const EN: Translations = Translations {
     status_applied: "Applied",
     status_error: "Error",
     status_connecting: "Connecting Bluetooth...",
+    filter_active: "Enable Device Filter",
+    filter_words: "Blacklist (comma separated):",
 };
 
 const PT: Translations = Translations {
@@ -76,95 +83,28 @@ const PT: Translations = Translations {
     status_applied: "Aplicado",
     status_error: "Erro",
     status_connecting: "Conectando Bluetooth...",
+    filter_active: "Ativar Filtro de Dispositivos",
+    filter_words: "Lista Negra (separada por vírgula):",
 };
 
-const ES: Translations = Translations {
-    title: "Selector de Audio",
-    bluetooth: "Bluetooth",
-    unified: "Mismo dispositivo para entrada/salida",
-    output: "Dispositivo de Salida",
-    input: "Dispositivo de Entrada",
-    audio_device: "Dispositivo de Audio",
-    refresh: "Actualizar Dispositivos",
-    status_ready: "Listo",
-    status_bt_on: "Bluetooth ACTIVADO",
-    status_bt_off: "Bluetooth DESACTIVADO",
-    status_applied: "Aplicado",
-    status_error: "Error",
-    status_connecting: "Conectando Bluetooth...",
-};
-
-const FR: Translations = Translations {
-    title: "Sélecteur d'Audio",
-    bluetooth: "Bluetooth",
-    unified: "Même appareil pour l'entrée/sortie",
-    output: "Appareil de Sortie",
-    input: "Appareil d'Entrée",
-    audio_device: "Appareil Audio",
-    refresh: "Actualiser les Appareils",
-    status_ready: "Prêt",
-    status_bt_on: "Bluetooth ACTIVÉ",
-    status_bt_off: "Bluetooth DÉSACTIVÉ",
-    status_applied: "Appliqué",
-    status_error: "Erreur",
-    status_connecting: "Connexion Bluetooth...",
-};
-
-const DE: Translations = Translations {
-    title: "Audio-Selector",
-    bluetooth: "Bluetooth",
-    unified: "Gleiches Gerät für Ein-/Ausgabe",
-    output: "Ausgabegerät",
-    input: "Eingabegerät",
-    audio_device: "Audiogerät",
-    refresh: "Geräte aktualisieren",
-    status_ready: "Bereit",
-    status_bt_on: "Bluetooth EIN",
-    status_bt_off: "Bluetooth AUS",
-    status_applied: "Angewendet",
-    status_error: "Fehler",
-    status_connecting: "Bluetooth wird verbunden...",
-};
-
-const IT: Translations = Translations {
-    title: "Selettore Audio",
-    bluetooth: "Bluetooth",
-    unified: "Stesso dispositivo per ingresso/uscita",
-    output: "Dispositivo di Uscita",
-    input: "Dispositivo di Ingresso",
-    audio_device: "Dispositivo Audio",
-    refresh: "Aggiorna Dispositivi",
-    status_ready: "Pronto",
-    status_bt_on: "Bluetooth ATTIVO",
-    status_bt_off: "Bluetooth NON ATTIVO",
-    status_applied: "Applicato",
-    status_error: "Errore",
-    status_connecting: "Connessione Bluetooth...",
-};
-
+#[cfg(target_os = "linux")]
 fn get_pactl_devices(target: &str) -> anyhow::Result<Vec<PactlDevice>> {
-    let output = Command::new("pactl")
-        .env("LC_ALL", "C")
-        .args(["--format=json", "list", target])
-        .output()
-        .context(format!("Failed to execute pactl list {}", target))?;
-
-    if !output.status.success() {
-        return Ok(Vec::new());
-    }
-
+    let output = Command::new("pactl").env("LC_ALL", "C").args(["--format=json", "list", target]).output()?;
+    if !output.status.success() { return Ok(Vec::new()); }
     let stdout = String::from_utf8_lossy(&output.stdout);
     let json_start = stdout.find('[').or_else(|| stdout.find('{'));
-    
-    let json_str = match json_start {
-        Some(start) => &stdout[start..],
-        None => return Ok(Vec::new()),
-    };
-
+    let json_str = match json_start { Some(start) => &stdout[start..], None => return Ok(Vec::new()) };
     let devices: Vec<PactlDevice> = serde_json::from_str(json_str.trim()).unwrap_or_default();
-    Ok(devices.into_iter().filter(|d| !d.name.contains(".monitor")).collect())
+    // For sources, we want both hardware inputs AND potentially monitor sources if they are needed, 
+    // but usually the user wants actual microphones. 
+    // However, we'll keep all non-monitor sources to ensure we don't miss anything.
+    Ok(devices.into_iter().filter(|d| !d.name.contains(".monitor") || target == "sinks").collect())
 }
 
+#[cfg(not(target_os = "linux"))]
+fn get_pactl_devices(_: &str) -> anyhow::Result<Vec<PactlDevice>> { Ok(Vec::new()) }
+
+#[cfg(target_os = "linux")]
 fn get_bluetooth_devices() -> Vec<PactlDevice> {
     let output = Command::new("bluetoothctl").arg("devices").output();
     let mut bt_devices = Vec::new();
@@ -173,345 +113,191 @@ fn get_bluetooth_devices() -> Vec<PactlDevice> {
         for line in stdout.lines() {
             let parts: Vec<&str> = line.split_whitespace().collect();
             if parts.len() >= 3 {
-                let mac = parts[1];
-                let name = parts[2..].join(" ");
-                bt_devices.push(PactlDevice {
-                    name: format!("bluez_connect.{}", mac),
-                    description: format!("{} (Bluetooth)", name), // (Bluetooth) after name
-                });
+                bt_devices.push(PactlDevice { name: format!("bluez_connect.{}", parts[1]), description: format!("{} (Bluetooth)", parts[2..].join(" ")) });
             }
         }
     }
     bt_devices
 }
 
-fn apply_device_change(target: &str, name: &str) -> anyhow::Result<()> {
-    let arg = if target == "sinks" { "set-default-sink" } else { "set-default-source" };
-    Command::new("pactl").env("LC_ALL", "C").args([arg, name]).status()?;
+#[cfg(not(target_os = "linux"))]
+fn get_bluetooth_devices() -> Vec<PactlDevice> { Vec::new() }
 
+#[cfg(target_os = "linux")]
+fn apply_device_change(target: &str, name: &str) -> anyhow::Result<()> {
+    Command::new("pactl").env("LC_ALL", "C").args([if target == "sinks" { "set-default-sink" } else { "set-default-source" }, name]).status()?;
     if target == "sinks" {
-        let inputs_output = Command::new("pactl").env("LC_ALL", "C").args(["list", "short", "sink-inputs"]).output()?;
-        let inputs = String::from_utf8_lossy(&inputs_output.stdout);
-        for line in inputs.lines() {
-            if let Some(id) = line.split_whitespace().next() {
-                let _ = Command::new("pactl").env("LC_ALL", "C").args(["move-sink-input", id, name]).status();
+        if let Ok(output) = Command::new("pactl").env("LC_ALL", "C").args(["list", "short", "sink-inputs"]).output() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            for line in stdout.lines() {
+                if let Some(id) = line.split_whitespace().next() { let _ = Command::new("pactl").env("LC_ALL", "C").args(["move-sink-input", id, name]).status(); }
+            }
+        }
+    } else {
+        if let Ok(output) = Command::new("pactl").env("LC_ALL", "C").args(["list", "short", "source-outputs"]).output() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            for line in stdout.lines() {
+                if let Some(id) = line.split_whitespace().next() { let _ = Command::new("pactl").env("LC_ALL", "C").args(["move-source-output", id, name]).status(); }
             }
         }
     }
     Ok(())
 }
 
-fn check_bluetooth_hardware() -> bool {
-    Command::new("bluetoothctl").arg("show").output()
-        .map(|o| o.status.success() && !String::from_utf8_lossy(&o.stdout).contains("No default controller available"))
-        .unwrap_or(false)
-}
+#[cfg(not(target_os = "linux"))]
+fn apply_device_change(_: &str, _: &str) -> anyhow::Result<()> { Ok(()) }
 
+#[cfg(target_os = "linux")]
 fn set_bluetooth_power(on: bool) -> anyhow::Result<()> {
-    let state = if on { "on" } else { "off" };
-    let _ = Command::new("bluetoothctl").args(["power", state]).status();
+    let _ = Command::new("bluetoothctl").args(["power", if on { "on" } else { "off" }]).status();
     Ok(())
 }
+
+#[cfg(not(target_os = "linux"))]
+fn set_bluetooth_power(_: bool) -> anyhow::Result<()> { Ok(()) }
 
 fn load_config() -> Config {
     if let Ok(content) = fs::read_to_string(CONFIG_FILE) {
-        if let Ok(config) = serde_json::from_str(&content) {
-            return config;
-        }
+        if let Ok(config) = serde_json::from_str(&content) { return config; }
     }
-    Config { unified_mode: true, bluetooth_enabled: false, ..Default::default() }
+    Config { unified_mode: true, ..Default::default() }
 }
 
 fn save_config(config: &Config) {
-    if let Ok(content) = serde_json::to_string_pretty(config) {
-        let _ = fs::write(CONFIG_FILE, content);
+    if let Ok(content) = serde_json::to_string_pretty(config) { let _ = fs::write(CONFIG_FILE, content); }
+}
+
+fn install_app() -> anyhow::Result<()> {
+    let current_exe = std::env::current_exe()?;
+    let exe_name = current_exe.file_name().unwrap();
+    let home = dirs::home_dir().context("Could not find home directory")?;
+    let paths = vec![home.join("bin"), home.join(".local").join("bin"), PathBuf::from("/usr/local/bin")];
+    for path in paths {
+        if !path.exists() { let _ = fs::create_dir_all(&path); }
+        let target = path.join(exe_name);
+        match fs::copy(&current_exe, &target) {
+            Ok(_) => { println!("Successfully installed to {:?}", target); return Ok(()); }
+            Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => println!("Permission denied for {:?}. Try with sudo.", path),
+            Err(e) => println!("Failed to copy to {:?}: {}", path, e),
+        }
     }
+    Err(anyhow::anyhow!("Could not install to any PATH directory."))
 }
 
 fn main() -> anyhow::Result<()> {
-    let mut config_data = load_config();
+    if std::env::args().any(|x| x == "-install") { return install_app(); }
+    let config_data = load_config();
     let ui = AppWindow::new()?;
-    
-    // Set window size/position if persisted
-    if let (Some(w), Some(h)) = (config_data.window_width, config_data.window_height) {
-        ui.window().set_size(slint::PhysicalSize::new(w as u32, h as u32));
-    }
-    if let (Some(x), Some(y)) = (config_data.window_x, config_data.window_y) {
-        ui.window().set_position(slint::PhysicalPosition::new(x, y));
-    }
-
-    let ui_handle = Arc::new(Mutex::new(ui.as_weak()));
-    // Localization
+    if let (Some(w), Some(h)) = (config_data.window_width, config_data.window_height) { ui.window().set_size(slint::PhysicalSize::new(w as u32, h as u32)); }
+    if let (Some(x), Some(y)) = (config_data.window_x, config_data.window_y) { ui.window().set_position(slint::PhysicalPosition::new(x, y)); }
+    let ui_weak = ui.as_weak();
+    let ui_handle = Arc::new(Mutex::new(ui_weak.clone()));
     let locale = get_locale().unwrap_or_else(|| "en".to_string());
-    let t_static = if locale.starts_with("pt") {
-        &PT
-    } else if locale.starts_with("es") {
-        &ES
-    } else if locale.starts_with("fr") {
-        &FR
-    } else if locale.starts_with("de") {
-        &DE
-    } else if locale.starts_with("it") {
-        &IT
-    } else {
-        &EN
-    };
-
-    
-    ui.set_l_title(t_static.title.into());
-    ui.set_l_bluetooth(t_static.bluetooth.into());
-    ui.set_l_unified(t_static.unified.into());
-    ui.set_l_output(t_static.output.into());
-    ui.set_l_input(t_static.input.into());
-    ui.set_l_audio_device(t_static.audio_device.into());
-    ui.set_l_refresh(t_static.refresh.into());
-    ui.set_status(t_static.status_ready.into());
+    let t_static = if locale.starts_with("pt") { &PT } else { &EN };
+    ui.set_l_title(t_static.title.into()); ui.set_l_bluetooth(t_static.bluetooth.into());
+    ui.set_l_unified(t_static.unified.into()); ui.set_l_output(t_static.output.into());
+    ui.set_l_input(t_static.input.into()); ui.set_l_audio_device(t_static.audio_device.into());
+    ui.set_l_refresh(t_static.refresh.into()); ui.set_l_filter_active(t_static.filter_active.into());
+    ui.set_l_filter_words(t_static.filter_words.into());
+    #[cfg(target_os = "linux")] ui.set_status(t_static.status_ready.into());
+    let config = Arc::new(Mutex::new(config_data));
+    {
+        let c = config.lock().unwrap();
+        ui.set_unified_mode(c.unified_mode); ui.set_bluetooth_enabled(c.bluetooth_enabled);
+        ui.set_filter_enabled(c.filter_enabled); ui.set_filter_words(c.filter_words.clone().into());
+    }
+    if ui.get_bluetooth_enabled() { let _ = set_bluetooth_power(true); }
 
     let sinks_cache = Arc::new(Mutex::new(Vec::<PactlDevice>::new()));
     let sources_cache = Arc::new(Mutex::new(Vec::<PactlDevice>::new()));
-    let config = Arc::new(Mutex::new(config_data));
-
-    {
-        let c = config.lock().unwrap();
-        ui.set_unified_mode(c.unified_mode);
-        ui.set_bluetooth_enabled(c.bluetooth_enabled);
-    }
-
-    let bt_available = check_bluetooth_hardware();
-    ui.set_bluetooth_available(bt_available);
-    if bt_available && ui.get_bluetooth_enabled() {
-        let _ = set_bluetooth_power(true);
-    }
-
-    // Refresh Logic
-    let sinks_ref = Arc::clone(&sinks_cache);
-    let sources_ref = Arc::clone(&sources_cache);
     let ui_ref = Arc::clone(&ui_handle);
     let config_ref = Arc::clone(&config);
-    let t_ref = if locale.starts_with("pt") {
-        &PT
-    } else if locale.starts_with("es") {
-        &ES
-    } else if locale.starts_with("fr") {
-        &FR
-    } else if locale.starts_with("de") {
-        &DE
-    } else if locale.starts_with("it") {
-        &IT
-    } else {
-        &EN
-    };
-
+    let s_cache_ref = Arc::clone(&sinks_cache);
+    let src_cache_ref = Arc::clone(&sources_cache);
     let refresh_fn = move || {
-        let ui_weak = ui_ref.lock().unwrap();
-        let ui = ui_weak.unwrap();
+        let ui = ui_ref.lock().unwrap().unwrap();
         let c = config_ref.lock().unwrap().clone();
-        
+        let blacklist: Vec<String> = if c.filter_enabled { c.filter_words.to_lowercase().split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect() } else { Vec::new() };
+        let is_blacklisted = |desc: &str| { let d = desc.to_lowercase(); blacklist.iter().any(|word| d.contains(word)) };
         let mut all_sinks = Vec::new();
-        if let Ok(sinks) = get_pactl_devices("sinks") {
-            all_sinks.extend(sinks);
-        }
-        all_sinks.extend(get_bluetooth_devices());
-
-        let descriptions: Vec<SharedString> = all_sinks.iter().map(|d| d.description.as_str().into()).collect();
-        ui.set_sink_names(ModelRc::from(Rc::new(VecModel::from(descriptions))));
-        
-        if let Some(last) = &c.last_sink {
-            if let Some(idx) = all_sinks.iter().position(|s| &s.name == last) {
-                ui.set_selected_sink_index(idx as i32);
-            } else if !all_sinks.is_empty() {
-                ui.set_selected_sink_index(0);
-            }
-        } else if !all_sinks.is_empty() {
-            ui.set_selected_sink_index(0);
-        }
-        *sinks_ref.lock().unwrap() = all_sinks;
-
+        if let Ok(sinks) = get_pactl_devices("sinks") { all_sinks.extend(sinks.into_iter().filter(|d| !is_blacklisted(&d.description))); }
+        all_sinks.extend(get_bluetooth_devices().into_iter().filter(|d| !is_blacklisted(&d.description)));
+        ui.set_sink_names(ModelRc::from(Rc::new(VecModel::from(all_sinks.iter().map(|d| d.description.as_str().into()).collect::<Vec<SharedString>>()))));
+        if let Some(idx) = c.last_sink.and_then(|last| all_sinks.iter().position(|s| s.name == last)) { ui.set_selected_sink_index(idx as i32); }
+        else if !all_sinks.is_empty() { ui.set_selected_sink_index(0); }
+        *s_cache_ref.lock().unwrap() = all_sinks;
         if let Ok(sources) = get_pactl_devices("sources") {
-            let descriptions: Vec<SharedString> = sources.iter().map(|d| d.description.as_str().into()).collect();
-            ui.set_source_names(ModelRc::from(Rc::new(VecModel::from(descriptions))));
-            
-            if let Some(last) = &c.last_source {
-                if let Some(idx) = sources.iter().position(|s| &s.name == last) {
-                    ui.set_selected_source_index(idx as i32);
-                } else if !sources.is_empty() {
-                    ui.set_selected_source_index(0);
-                }
-            } else if !sources.is_empty() {
-                ui.set_selected_source_index(0);
-            }
-            *sources_ref.lock().unwrap() = sources;
+            let filtered: Vec<PactlDevice> = sources.into_iter().filter(|d| !is_blacklisted(&d.description)).collect();
+            ui.set_source_names(ModelRc::from(Rc::new(VecModel::from(filtered.iter().map(|d| d.description.as_str().into()).collect::<Vec<SharedString>>()))));
+            if let Some(idx) = c.last_source.and_then(|last| filtered.iter().position(|s| s.name == last)) { ui.set_selected_source_index(idx as i32); }
+            else if !filtered.is_empty() { ui.set_selected_source_index(0); }
+            *src_cache_ref.lock().unwrap() = filtered;
         }
-        ui.set_status(t_ref.status_ready.into());
     };
-
     refresh_fn();
-    ui.on_refresh(refresh_fn);
-
-    // Bluetooth Toggle
-    let config_bt = Arc::clone(&config);
-    let ui_bt = Arc::clone(&ui_handle);
-    let t_bt = if locale.starts_with("pt") {
-        &PT
-    } else if locale.starts_with("es") {
-        &ES
-    } else if locale.starts_with("fr") {
-        &FR
-    } else if locale.starts_with("de") {
-        &DE
-    } else if locale.starts_with("it") {
-        &IT
-    } else {
-        &EN
-    };
-    ui.on_toggle_bluetooth(move |on| {
-        let _ = set_bluetooth_power(on);
-        let mut c = config_bt.lock().unwrap();
-        c.bluetooth_enabled = on;
-        save_config(&c);
-        let ui_weak = ui_bt.lock().unwrap();
-        let ui = ui_weak.unwrap();
-        ui.set_status(if on { t_bt.status_bt_on.into() } else { t_bt.status_bt_off.into() });
-    });
-
-    // Unified Toggle
-    let config_uni = Arc::clone(&config);
-    ui.on_toggle_unified(move |on| {
-        let mut c = config_uni.lock().unwrap();
-        c.unified_mode = on;
-        save_config(&c);
-    });
-
-    // Change Logic
+    let r1 = refresh_fn.clone(); ui.on_refresh(r1);
+    let config_bt = Arc::clone(&config); ui.on_toggle_bluetooth(move |on| { let _ = set_bluetooth_power(on); let mut c = config_bt.lock().unwrap(); c.bluetooth_enabled = on; save_config(&c); });
+    let config_uni = Arc::clone(&config); ui.on_toggle_unified(move |on| { let mut c = config_uni.lock().unwrap(); c.unified_mode = on; save_config(&c); });
+    let config_filter = Arc::clone(&config); let r2 = refresh_fn.clone(); ui.on_toggle_filter(move |on| { { let mut c = config_filter.lock().unwrap(); c.filter_enabled = on; save_config(&c); } r2(); });
+    let config_words = Arc::clone(&config); let r3 = refresh_fn.clone(); ui.on_filter_words_changed(move |words| { { let mut c = config_words.lock().unwrap(); c.filter_words = words.to_string(); save_config(&c); } r3(); });
     let sinks_change = Arc::clone(&sinks_cache);
     let sources_change = Arc::clone(&sources_cache);
     let config_change = Arc::clone(&config);
-    let ui_change = Arc::clone(&ui_handle);
+    let ui_weak_change = ui_weak.clone();
     let locale_change = locale.clone();
-
-    let change_handler = move |sink_idx: i32, source_idx: i32| {
-        let ui_weak_lock = ui_change.lock().unwrap();
-        let ui_weak = (*ui_weak_lock).clone();
-        let ui = ui_weak.unwrap();
-        let t = if locale_change.starts_with("pt") {
-            &PT
-        } else if locale_change.starts_with("es") {
-            &ES
-        } else if locale_change.starts_with("fr") {
-            &FR
-        } else if locale_change.starts_with("de") {
-            &DE
-        } else if locale_change.starts_with("it") {
-            &IT
-        } else {
-            &EN
-        };
-        
+    let handler = move |sink_idx: i32, source_idx: i32| {
+        let ui = ui_weak_change.unwrap();
+        let t = if locale_change.starts_with("pt") { &PT } else { &EN };
         if sink_idx >= 0 {
             let sinks = sinks_change.lock().unwrap();
             if (sink_idx as usize) < sinks.len() {
                 let s_name = sinks[sink_idx as usize].name.clone();
                 let unified = ui.get_unified_mode();
-                
-                let ui_async = ui_weak.clone();
-                let ui_async_status = ui_weak.clone();
-                let sources_async = Arc::clone(&sources_change);
-                let config_async = Arc::clone(&config_change);
-                let t_async = if locale_change.starts_with("pt") {
-                    &PT
-                } else if locale_change.starts_with("es") {
-                    &ES
-                } else if locale_change.starts_with("fr") {
-                    &FR
-                } else if locale_change.starts_with("de") {
-                    &DE
-                } else if locale_change.starts_with("it") {
-                    &IT
-                } else {
-                    &EN
-                };
-
+                let ui_async = ui_weak_change.clone();
+                let src_async = Arc::clone(&sources_change);
+                let cfg_async = Arc::clone(&config_change);
+                let loc_async = locale_change.clone();
                 thread::spawn(move || {
+                    let t_async = if loc_async.starts_with("pt") { &PT } else { &EN };
                     let mut actual_name = s_name.clone();
+                    #[cfg(target_os = "linux")]
                     if s_name.starts_with("bluez_connect.") {
                         let mac = s_name.replace("bluez_connect.", "");
                         let ui_c = ui_async.clone();
-                        let _ = slint::invoke_from_event_loop(move || {
-                            ui_c.unwrap().set_status(t_async.status_connecting.into());
-                        });
-                        
+                        let _ = slint::invoke_from_event_loop(move || { ui_c.unwrap().set_status(t_async.status_connecting.into()); });
                         let _ = Command::new("bluetoothctl").args(["connect", &mac]).status();
                         thread::sleep(std::time::Duration::from_millis(2000));
-                        
-                        if let Ok(pactl_sinks) = get_pactl_devices("sinks") {
-                            if let Some(found) = pactl_sinks.iter().find(|s| s.name.contains(&mac.replace(":", "_"))) {
-                                actual_name = found.name.clone();
-                            }
-                        }
+                        if let Ok(p) = get_pactl_devices("sinks") { if let Some(f) = p.iter().find(|s| s.name.contains(&mac.replace(":", "_"))) { actual_name = f.name.clone(); } }
                     }
-
-                    if let Err(_) = apply_device_change("sinks", &actual_name) { return; }
-                    
-                    let mut c = config_async.lock().unwrap();
+                    let _ = apply_device_change("sinks", &actual_name);
+                    let mut c = cfg_async.lock().unwrap();
                     c.last_sink = Some(actual_name.clone());
-
                     if unified {
                         let base = actual_name.replace("bluez_sink", "").replace(".a2dp_sink", "").replace(".hifi", "");
-                        let sources = sources_async.lock().unwrap();
-                        for src in sources.iter() {
-                            if src.name.contains(&base) {
-                                let _ = apply_device_change("sources", &src.name);
-                                c.last_source = Some(src.name.clone());
-                                break;
-                            }
-                        }
+                        let sources = src_async.lock().unwrap();
+                        for src in sources.iter() { if src.name.contains(&base) { let _ = apply_device_change("sources", &src.name); c.last_source = Some(src.name.clone()); break; } }
                     }
                     save_config(&c);
-                    let _ = slint::invoke_from_event_loop(move || {
-                        ui_async_status.unwrap().set_status(format!("{} - {}", t_async.status_applied, chrono::Local::now().format("%H:%M:%S")).into());
-                    });
+                    let _ = slint::invoke_from_event_loop(move || { ui_async.unwrap().set_status(format!("{} - {}", t_async.status_applied, chrono::Local::now().format("%H:%M:%S")).into()); });
                 });
             }
         }
-
         if !ui.get_unified_mode() && source_idx >= 0 {
             let sources = sources_change.lock().unwrap();
             if (source_idx as usize) < sources.len() {
                 let s_name = sources[source_idx as usize].name.clone();
                 let mut c = config_change.lock().unwrap();
                 let _ = apply_device_change("sources", &s_name);
-                c.last_source = Some(s_name);
-                save_config(&c);
+                c.last_source = Some(s_name); save_config(&c);
                 ui.set_status(format!("{} - {}", t.status_applied, chrono::Local::now().format("%H:%M:%S")).into());
             }
         }
     };
-
-    let change_sink = change_handler.clone();
-    ui.on_sink_changed(move |idx| {
-        change_sink(idx, -1);
-    });
-
-    let change_source = change_handler.clone();
-    ui.on_source_changed(move |idx| {
-        change_source(-1, idx);
-    });
-
-    // Save window state before exit
-    let window = ui.window();
-    let config_exit = Arc::clone(&config);
-    
-    ui.run()?;
-    
-    // Final save of window geometry
+    let h1 = handler.clone(); ui.on_sink_changed(move |idx| h1(idx, -1));
+    let h2 = handler.clone(); ui.on_source_changed(move |idx| h2(-1, idx));
+    let window = ui.window(); let config_exit = Arc::clone(&config); ui.run()?;
     let mut c = config_exit.lock().unwrap();
-    let size = window.size();
-    c.window_width = Some(size.width as f32);
-    c.window_height = Some(size.height as f32);
-    let pos = window.position();
-    c.window_x = Some(pos.x);
-    c.window_y = Some(pos.y);
-    save_config(&c);
-    
-    Ok(())
+    let size = window.size(); c.window_width = Some(size.width as f32); c.window_height = Some(size.height as f32);
+    let pos = window.position(); c.window_x = Some(pos.x); c.window_y = Some(pos.y);
+    save_config(&c); Ok(())
 }
