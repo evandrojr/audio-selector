@@ -13,14 +13,16 @@ A Rust-based desktop application using the Slint GUI framework to manage system 
 - **Advanced Options Tab:**
   - **Excluded Devices:** A robust Checkbox list to hide unwanted outputs/inputs (like HDMI monitors) from the main dropdowns.
 - **Persistence & UI:**
-  - **System Tray:** Minimizes to the system tray (`tray-icon`).
   - **Window Memory:** Saves and loads position and dimensions to/from `config.json`.
-  - **Multi-language:** Supports 6 languages based on system locale (EN, PT, ES, FR, DE, IT).
+  - **Multi-language:** Supports 3 languages based on system locale (EN, PT, ES).
+- **Debugging:**
+  - **Log Window:** Searchable log viewer window for troubleshooting (logs saved to `~/audio-selector-debug.log`).
 
 ## Technical Stack
 - **GUI:** Slint 1.8.0.
 - **System Backend:** `pactl` (PulseAudio/PipeWire) and `bluetoothctl`.
-- **System Integration:** `tray-icon` (AppIndicator/GTK), `dirs`.
+- **System Integration:** `dirs`, `sys-locale`.
+- **Logging:** File-based logging to `~/audio-selector-debug.log`.
 
 ## Installation & Autostart
 Run the binary with the `-install` flag to copy the app to your `PATH` and set it to start with your window manager:
