@@ -234,10 +234,8 @@ fn main() -> anyhow::Result<()> {
                     });
                     
                     let _ = Box::leak(Box::new(icon));
-                    loop { 
-                        while gtk::events_pending() { gtk::main_iteration_do(false); }
-                        thread::sleep(std::time::Duration::from_millis(50));
-                    }
+                    append_log("Entering GTK main loop for tray icon.");
+                    gtk::main();
                 }
                 Err(e) => append_log(&format!("Tray icon build failed: {}", e)),
             }
