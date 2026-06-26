@@ -1,6 +1,9 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
+use std::sync::Mutex;
 use crate::utils::get_config_path;
+
+static WRITE_LOCK: Mutex<()> = Mutex::new(());
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 #[serde(default)]
@@ -36,7 +39,9 @@ pub fn load_config() -> Config {
 }
 
 pub fn save_config(config: &Config) {
-    if let Ok(c) = serde_json::to_string_pretty(config) {
+    let serialized = serde_json::to_string_pretty(config);
+    if let Ok(c) = serialized {
+        let _lock = WRITE_LOCK.lock().unwrap();
         let _ = fs::write(get_config_path(), c);
     }
 }
