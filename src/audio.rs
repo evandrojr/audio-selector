@@ -33,7 +33,7 @@ fn run_pactl(args: &[&str]) -> std::io::Result<std::process::Output> {
     Command::new("timeout").args(["10s", "pactl"]).args(args).env("LC_ALL", "C").output()
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(any(target_os = "linux", target_os = "windows")))]
 fn run_pactl(args: &[&str]) -> std::io::Result<std::process::Output> {
     Command::new("pactl").args(args).output()
 }
@@ -68,7 +68,12 @@ pub fn get_pactl_devices(target: &str) -> anyhow::Result<Vec<PactlDevice>> {
     }
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(target_os = "windows")]
+pub fn get_pactl_devices(target: &str) -> anyhow::Result<Vec<PactlDevice>> {
+    crate::audio_windows::get_windows_devices(target)
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "windows")))]
 pub fn get_pactl_devices(_: &str) -> anyhow::Result<Vec<PactlDevice>> { Ok(Vec::new()) }
 
 #[cfg(target_os = "linux")]
@@ -76,7 +81,7 @@ fn run_pactl_short(args: &[&str]) -> std::io::Result<std::process::ExitStatus> {
     Command::new("timeout").args(["5s", "pactl"]).args(args).env("LC_ALL", "C").status()
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(any(target_os = "linux", target_os = "windows")))]
 fn run_pactl_short(args: &[&str]) -> std::io::Result<std::process::ExitStatus> {
     Command::new("pactl").args(args).status()
 }
@@ -98,7 +103,12 @@ pub fn apply_device_change(target: &str, name: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(target_os = "windows")]
+pub fn apply_device_change(target: &str, name: &str) -> anyhow::Result<()> {
+    crate::audio_windows::apply_windows_device_change(target, name)
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "windows")))]
 pub fn apply_device_change(_: &str, _: &str) -> anyhow::Result<()> { Ok(()) }
 
 #[cfg(target_os = "linux")]
@@ -107,5 +117,10 @@ pub fn set_sink_volume(name: &str, vol: i32) -> anyhow::Result<()> {
     Ok(())
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(target_os = "windows")]
+pub fn set_sink_volume(name: &str, vol: i32) -> anyhow::Result<()> {
+    crate::audio_windows::set_windows_volume(name, vol)
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "windows")))]
 pub fn set_sink_volume(_: &str, _: i32) -> anyhow::Result<()> { Ok(()) }
