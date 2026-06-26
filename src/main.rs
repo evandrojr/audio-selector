@@ -3,7 +3,7 @@ slint::include_modules!();
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use std::process::Command;
-use slint::{ModelRc, VecModel, SharedString, ComponentHandle, Model};
+use slint::{ModelRc, VecModel, SharedString, ComponentHandle};
 use std::rc::Rc;
 use std::fs;
 use std::sync::{Arc, Mutex};
