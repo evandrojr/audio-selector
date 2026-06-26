@@ -115,13 +115,25 @@ fn get_current_translations() -> &'static Translations {
 
 #[cfg(target_os = "linux")]
 fn get_pactl_devices(target: &str) -> anyhow::Result<Vec<PactlDevice>> {
-    let output = Command::new("pactl").env("LC_ALL", "C").args(["--format=json", "list", target]).output()?;
-    if !output.status.success() { return Ok(Vec::new()); }
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let json_start = stdout.find('[').or_else(|| stdout.find('{'));
-    let json_str = match json_start { Some(start) => &stdout[start..], None => return Ok(Vec::new()) };
-    let devices: Vec<PactlDevice> = serde_json::from_str(json_str.trim()).unwrap_or_default();
-    Ok(devices.into_iter().filter(|d| { if target == "sources" { !d.name.contains(".monitor") || d.name.contains("bluez_source") } else { true } }).collect())
+    let output = Command::new("pactl").env("LC_ALL", "C").args(["--format=json", "list", target]).output();
+    match output {
+        Ok(o) => {
+            if !o.status.success() {
+                let err = String::from_utf8_lossy(&o.stderr);
+                append_log(&format!("pactl list {} failed: {}", target, err));
+                return Ok(Vec::new());
+            }
+            let stdout = String::from_utf8_lossy(&o.stdout);
+            let json_start = stdout.find('[').or_else(|| stdout.find('{'));
+            let json_str = match json_start { Some(start) => &stdout[start..], None => return Ok(Vec::new()) };
+            let devices: Vec<PactlDevice> = serde_json::from_str(json_str.trim()).unwrap_or_default();
+            Ok(devices.into_iter().filter(|d| { if target == "sources" { !d.name.contains(".monitor") || d.name.contains("bluez_source") } else { true } }).collect())
+        },
+        Err(e) => {
+            append_log(&format!("pactl command execution failed: {}", e));
+            Err(e.into())
+        }
+    }
 }
 #[cfg(not(target_os = "linux"))] fn get_pactl_devices(_: &str) -> anyhow::Result<Vec<PactlDevice>> { Ok(Vec::new()) }
 
@@ -134,6 +146,8 @@ fn get_bluetooth_devices() -> Vec<PactlDevice> {
             let p: Vec<&str> = line.split_whitespace().collect();
             if p.len() >= 3 { bt.push(PactlDevice { name: format!("bluez_connect.{}", p[1]), description: format!("{} (Bluetooth)", p[2..].join(" ")), volume: None }); }
         }
+    } else if let Err(e) = output {
+        append_log(&format!("bluetoothctl failed: {}", e));
     }
     bt
 }
@@ -260,7 +274,8 @@ fn main() -> anyhow::Result<()> {
             append_log(&format!("Found {} sources", rsrc.len()));
             for b in bt.iter() { let m = b.name.replace("bluez_connect.", "").replace(":", "_").to_lowercase(); if !rsrc.iter().any(|s| s.name.to_lowercase().contains(&m)) { rsrc.push(b.clone()); } }
             let h_u = c.hide_unknown_bt; let is_u = |desc: &str| { if !h_u { return false; } let d = desc.to_uppercase(); let b = d.replace(" (BLUETOOTH)", "").trim().to_string(); b.len() == 17 && (b.chars().filter(|c| *c == '-').count() == 5 || b.chars().filter(|c| *c == ':').count() == 5) };
-            let excl = c.excluded_devices.clone(); let f_e = c.filter_enabled;
+            let excl = c.excluded_devices.clone(); 
+            let f_e = c.filter_enabled;
             let fsinks: Vec<PactlDevice> = rs.into_iter().filter(|d| (!f_e || !excl.contains(&d.name)) && !is_u(&d.description)).collect();
             let fsrcs: Vec<PactlDevice> = rsrc.into_iter().filter(|d| (!f_e || !excl.contains(&d.name)) && !is_u(&d.description)).collect();
             let mut all_u: Vec<PactlDevice> = Vec::new(); for d in fsinks.iter().chain(fsrcs.iter()) { if !all_u.iter().any(|u| u.name == d.name) { all_u.push(d.clone()); } }
@@ -279,6 +294,7 @@ fn main() -> anyhow::Result<()> {
             }});
         });
     };
+    
     let r_init = refresh_fn.clone(); r_init(); ui.on_refresh(refresh_fn.clone());
 
     let c_bt = Arc::clone(&cfg_arc); ui.on_toggle_bluetooth(move |on| { let _ = set_bluetooth_power(on); let mut c = c_bt.lock().unwrap(); c.bluetooth_enabled = on; save_config(&c); });

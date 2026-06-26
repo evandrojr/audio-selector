@@ -9,20 +9,21 @@ A Rust-based desktop application using the Slint GUI framework to manage system 
   - **Force Move:** Uses `pactl move-sink-input` to force currently playing audio to the new device (e.g., HDMI, Bluetooth).
 - **Advanced Bluetooth Control:**
   - **Auto Connection:** Lists paired (even if disconnected) Bluetooth devices. Selecting one attempts to `connect` via `bluetoothctl` and then switches audio to it.
-  - **Hide Unknown MACs:** Feature to filter out Bluetooth devices consisting of just MAC addresses (e.g., neighbors' TVs).
+  - **Hide Unknown MACs:** Feature to filter out Bluetooth devices consisting of just MAC addresses.
 - **Advanced Options Tab:**
-  - **Excluded Devices:** A robust Checkbox list to hide unwanted outputs/inputs (like HDMI monitors) from the main dropdowns.
+  - **Excluded Devices:** A robust Checkbox list to hide unwanted outputs/inputs from the main dropdowns.
 - **Persistence & UI:**
-  - **Window Memory:** Saves and loads position and dimensions to/from `config.json`.
-  - **Multi-language:** Supports 3 languages based on system locale (EN, PT, ES).
+  - **Config Path:** Configuration saved to `~/.config/audio-selector/config.json`.
+  - **Window Memory:** Saves and loads position and dimensions.
+  - **Multi-language:** Supports 3 languages based on system locale (EN, PT, ES, FR, DE, IT).
 - **Debugging:**
-  - **Log Window:** Searchable log viewer window for troubleshooting (logs saved to `~/audio-selector-debug.log`).
+  - **Separate Log Window:** Searchable diagnostic window for troubleshooting (logs saved to `~/.config/audio-selector/debug.log`).
 
 ## Technical Stack
 - **GUI:** Slint 1.8.0.
 - **System Backend:** `pactl` (PulseAudio/PipeWire) and `bluetoothctl`.
 - **System Integration:** `dirs`, `sys-locale`.
-- **Logging:** File-based logging to `~/audio-selector-debug.log`.
+- **Logging:** File-based logging to `~/.config/audio-selector/debug.log`.
 
 ## Installation & Autostart
 Run the binary with the `-install` flag to copy the app to your `PATH` and set it to start with your window manager:
