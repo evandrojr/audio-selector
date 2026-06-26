@@ -15,7 +15,15 @@ use tray_icon::{
     TrayIconBuilder, Icon,
 };
 
-const CONFIG_FILE: &str = "config.json";
+fn get_config_dir() -> PathBuf {
+    let mut p = dirs::config_dir().unwrap_or_else(|| dirs::home_dir().unwrap_or_default().join(".config"));
+    p.push("audio-selector");
+    if !p.exists() { let _ = fs::create_dir_all(&p); }
+    p
+}
+
+fn get_config_path() -> PathBuf { get_config_dir().join("config.json") }
+fn get_log_path() -> PathBuf { get_config_dir().join("debug.log") }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 #[serde(default)]
@@ -100,54 +108,9 @@ const PT: Translations = Translations {
     volume: "Volume", menu_quit: "Sair", open_logs: "Abrir Logs da Aplicação",
 };
 
-const ES: Translations = Translations {
-    title: "Selector de Audio", tab_devices: "Dispositivos", advanced_options: "Opciones Avanzadas",
-    hide_unknown_bt: "Ocultar dispositivos Bluetooth desconocidos (MAC)", bluetooth: "Bluetooth",
-    unified: "Mismo dispositivo para entrada/salida", output: "Dispositivo de Salida", input: "Dispositivo de Entrada",
-    audio_device: "Dispositivo de Audio", refresh: "Actualizar Dispositivos", status_ready: "Listo",
-    status_applied: "Aplicado", status_connecting: "Conectando Bluetooth...",
-    filter_active: "Activar Dispositivos Excluidos", exclude_instruction: "Marque los dispositivos a continuación:",
-    volume: "Volumen", menu_quit: "Salir", open_logs: "Abrir Logs de la Aplicación",
-};
-
-const FR: Translations = Translations {
-    title: "Sélecteur d'Audio", tab_devices: "Appareils", advanced_options: "Options Avancées",
-    hide_unknown_bt: "Masquer les appareils Bluetooth inconnus (MAC)", bluetooth: "Bluetooth",
-    unified: "Même appareil pour l'entrée/sortie", output: "Appareil de Sortie", input: "Appareil d'Entrée",
-    audio_device: "Appareil Audio", refresh: "Actualiser les Appareils", status_ready: "Prêt",
-    status_applied: "Appliqué", status_connecting: "Connexion Bluetooth...",
-    filter_active: "Activer Appareils Exclus", exclude_instruction: "Cochez les appareils ci-dessous:",
-    volume: "Volume", menu_quit: "Quitter", open_logs: "Ouvrir os Logs de l'Application",
-};
-
-const DE: Translations = Translations {
-    title: "Audio-Selector", tab_devices: "Geräte", advanced_options: "Erweiterte Optionen",
-    hide_unknown_bt: "Unbekannte Bluetooth-Geräte ausblenden (MAC)", bluetooth: "Bluetooth",
-    unified: "Gleiches Gerät für Ein-/Ausgabe", output: "Ausgabegerät", input: "Eingabegerät",
-    audio_device: "Audiogerät", refresh: "Geräte aktualisieren", status_ready: "Bereit",
-    status_applied: "Angewendet", status_connecting: "Bluetooth wird verbunden...",
-    filter_active: "Ausgeschlossene Geräte aktivieren", exclude_instruction: "Geräte unten ankreuzen:",
-    volume: "Lautstärke", menu_quit: "Beenden", open_logs: "Anwendungsprotokolle öffnen",
-};
-
-const IT: Translations = Translations {
-    title: "Selettore Audio", tab_devices: "Dispositivi", advanced_options: "Opzioni Avanzate",
-    hide_unknown_bt: "Nascondi dispositivos Bluetooth sconosciuti (MAC)", bluetooth: "Bluetooth",
-    unified: "Stesso dispositivo per ingresso/uscita", output: "Dispositivo di Uscita", input: "Dispositivo de Ingresso",
-    audio_device: "Dispositivo Audio", refresh: "Aggiorna Dispositivi", status_ready: "Pronto",
-    status_applied: "Aplicado", status_connecting: "Connessione Bluetooth...",
-    filter_active: "Abilita Dispositivi Esclusi", exclude_instruction: "Seleziona i dispositivos qui sotto:",
-    volume: "Volume", menu_quit: "Esci", open_logs: "Apri i Log dell'Applicazione",
-};
-
 fn get_current_translations() -> &'static Translations {
     let loc = get_locale().unwrap_or_else(|| "en".to_string());
-    if loc.starts_with("pt") { &PT }
-    else if loc.starts_with("es") { &ES }
-    else if loc.starts_with("fr") { &FR }
-    else if loc.starts_with("de") { &DE }
-    else if loc.starts_with("it") { &IT }
-    else { &EN }
+    if loc.starts_with("pt") { &PT } else { &EN }
 }
 
 #[cfg(target_os = "linux")]
@@ -160,9 +123,7 @@ fn get_pactl_devices(target: &str) -> anyhow::Result<Vec<PactlDevice>> {
     let devices: Vec<PactlDevice> = serde_json::from_str(json_str.trim()).unwrap_or_default();
     Ok(devices.into_iter().filter(|d| { if target == "sources" { !d.name.contains(".monitor") || d.name.contains("bluez_source") } else { true } }).collect())
 }
-
-#[cfg(not(target_os = "linux"))]
-fn get_pactl_devices(_: &str) -> anyhow::Result<Vec<PactlDevice>> { Ok(Vec::new()) }
+#[cfg(not(target_os = "linux"))] fn get_pactl_devices(_: &str) -> anyhow::Result<Vec<PactlDevice>> { Ok(Vec::new()) }
 
 #[cfg(target_os = "linux")]
 fn get_bluetooth_devices() -> Vec<PactlDevice> {
@@ -176,9 +137,7 @@ fn get_bluetooth_devices() -> Vec<PactlDevice> {
     }
     bt
 }
-
-#[cfg(not(target_os = "linux"))]
-fn get_bluetooth_devices() -> Vec<PactlDevice> { Vec::new() }
+#[cfg(not(target_os = "linux"))] fn get_bluetooth_devices() -> Vec<PactlDevice> { Vec::new() }
 
 #[cfg(target_os = "linux")]
 fn apply_device_change(target: &str, name: &str) -> anyhow::Result<()> {
@@ -192,34 +151,19 @@ fn apply_device_change(target: &str, name: &str) -> anyhow::Result<()> {
     }
     Ok(())
 }
+#[cfg(not(target_os = "linux"))] fn apply_device_change(_: &str, _: &str) -> anyhow::Result<()> { Ok(()) }
 
-#[cfg(not(target_os = "linux"))]
-fn apply_device_change(_: &str, _: &str) -> anyhow::Result<()> { Ok(()) }
+#[cfg(target_os = "linux")] fn set_sink_volume(name: &str, vol: i32) -> anyhow::Result<()> { let _ = Command::new("pactl").env("LC_ALL", "C").args(["set-sink-volume", name, &format!("{}%", vol)]).status(); Ok(()) }
+#[cfg(not(target_os = "linux"))] fn set_sink_volume(_: &str, _: i32) -> anyhow::Result<()> { Ok(()) }
 
-#[cfg(target_os = "linux")]
-fn set_sink_volume(name: &str, vol: i32) -> anyhow::Result<()> {
-    let _ = Command::new("pactl").env("LC_ALL", "C").args(["set-sink-volume", name, &format!("{}%", vol)]).status();
-    Ok(())
-}
-
-#[cfg(not(target_os = "linux"))]
-fn set_sink_volume(_: &str, _: i32) -> anyhow::Result<()> { Ok(()) }
-
-#[cfg(target_os = "linux")]
-fn set_bluetooth_power(on: bool) -> anyhow::Result<()> {
-    let _ = Command::new("bluetoothctl").args(["power", if on { "on" } else { "off" }]).status();
-    Ok(())
-}
-
-#[cfg(not(target_os = "linux"))]
-fn set_bluetooth_power(_: bool) -> anyhow::Result<()> { Ok(()) }
+#[cfg(target_os = "linux")] fn set_bluetooth_power(on: bool) -> anyhow::Result<()> { let _ = Command::new("bluetoothctl").args(["power", if on { "on" } else { "off" }]).status(); Ok(()) }
+#[cfg(not(target_os = "linux"))] fn set_bluetooth_power(_: bool) -> anyhow::Result<()> { Ok(()) }
 
 fn load_config() -> Config {
-    if let Ok(c) = fs::read_to_string(CONFIG_FILE) { if let Ok(cfg) = serde_json::from_str(&c) { return cfg; } }
+    if let Ok(c) = fs::read_to_string(get_config_path()) { if let Ok(cfg) = serde_json::from_str(&c) { return cfg; } }
     Config { unified_mode: true, ..Default::default() }
 }
-
-fn save_config(config: &Config) { if let Ok(c) = serde_json::to_string_pretty(config) { let _ = fs::write(CONFIG_FILE, c); } }
+fn save_config(config: &Config) { if let Ok(c) = serde_json::to_string_pretty(config) { let _ = fs::write(get_config_path(), c); } }
 
 fn install_app() -> anyhow::Result<()> {
     let cur = std::env::current_exe()?; let home = dirs::home_dir().context("No home")?;
@@ -245,7 +189,7 @@ fn load_tray_icon() -> Icon {
 
 use std::io::Read;
 fn get_log_content(search: &str) -> String {
-    let path = dirs::home_dir().unwrap_or_default().join("audio-selector-debug.log");
+    let path = get_log_path();
     if let Ok(mut f) = std::fs::File::open(&path) {
         let mut c = String::new();
         if f.read_to_string(&mut c).is_ok() {
@@ -255,39 +199,31 @@ fn get_log_content(search: &str) -> String {
     }
     "No logs.".to_string()
 }
-
 fn append_log(msg: &str) {
     use std::io::Write;
-    let path = dirs::home_dir().unwrap_or_default().join("audio-selector-debug.log");
-    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) { let _ = f.write_all(format!("{}\n", msg).as_bytes()); }
+    let path = get_log_path();
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) { let _ = f.write_all(format!("{} - {}\n", chrono::Local::now().format("%Y-%m-%d %H:%M:%S"), msg).as_bytes()); }
 }
 
 fn main() -> anyhow::Result<()> {
+    append_log("Application starting...");
     if std::env::args().any(|x| x == "-install") { return install_app(); }
     let config_data = load_config(); let ui = AppWindow::new()?;
     if let (Some(w), Some(h)) = (config_data.window_width, config_data.window_height) { ui.window().set_size(slint::PhysicalSize::new(w as u32, h as u32)); }
     if let (Some(x), Some(y)) = (config_data.window_x, config_data.window_y) { ui.window().set_position(slint::PhysicalPosition::new(x, y)); }
-    
-    let ui_weak = ui.as_weak();
-    let ui_handle = Arc::new(Mutex::new(ui_weak.clone()));
+    let ui_weak = ui.as_weak(); let ui_handle = Arc::new(Mutex::new(ui_weak.clone()));
     let t = get_current_translations();
-    
     ui.set_l_title(t.title.into()); ui.set_l_tab_devices(t.tab_devices.into()); ui.set_l_advanced_options(t.advanced_options.into()); ui.set_l_hide_unknown_bt(t.hide_unknown_bt.into()); ui.set_l_bluetooth(t.bluetooth.into()); ui.set_l_unified(t.unified.into()); ui.set_l_output(t.output.into()); ui.set_l_input(t.input.into()); ui.set_l_audio_device(t.audio_device.into()); ui.set_l_refresh(t.refresh.into()); ui.set_l_filter_active(t.filter_active.into()); ui.set_l_exclude_instruction(t.exclude_instruction.into()); ui.set_l_volume(t.volume.into()); ui.set_l_open_logs(t.open_logs.into());
     #[cfg(target_os = "linux")] ui.set_status(t.status_ready.into());
-    
     let cfg_arc = Arc::new(Mutex::new(config_data));
-    {
-        let c = cfg_arc.lock().unwrap();
-        ui.set_unified_mode(c.unified_mode); ui.set_bluetooth_enabled(c.bluetooth_enabled);
-        ui.set_filter_enabled(c.filter_enabled); ui.set_hide_unknown_bt(c.hide_unknown_bt);
-    }
+    { let c = cfg_arc.lock().unwrap(); ui.set_unified_mode(c.unified_mode); ui.set_bluetooth_enabled(c.bluetooth_enabled); ui.set_filter_enabled(c.filter_enabled); ui.set_hide_unknown_bt(c.hide_unknown_bt); }
     if ui.get_bluetooth_enabled() { let _ = set_bluetooth_power(true); }
 
     #[cfg(target_os = "linux")] { if gtk::init().is_ok() {
         let menu = Menu::new(); let q_i = MenuItem::new(t.menu_quit, true, None); let q_id = q_i.id().clone(); let _ = menu.append_items(&[&q_i]);
         if let Ok(icon) = TrayIconBuilder::new().with_menu(Box::new(menu)).with_tooltip(t.title).with_icon(load_tray_icon()).build() {
-            thread::spawn(move || { let m_c = MenuEvent::receiver(); loop { if let Ok(e) = m_c.recv() { if e.id == q_id { std::process::exit(0); } } } });
-            let u_i = ui_weak.clone(); thread::spawn(move || { let t_c = tray_icon::TrayIconEvent::receiver(); let ui_local = u_i.clone(); loop { if let Ok(e) = t_c.recv() { if let tray_icon::TrayIconEvent::Click { button: tray_icon::MouseButton::Left, .. } = e { let ui_inner = ui_local.clone(); let _ = slint::invoke_from_event_loop(move || { if let Some(uw) = ui_inner.upgrade() { uw.window().show().unwrap(); } }); } } } });
+            let u_t1 = ui_weak.clone(); thread::spawn(move || { let m_c = MenuEvent::receiver(); loop { if let Ok(e) = m_c.recv() { if e.id == q_id { std::process::exit(0); } } } });
+            let u_t2 = ui_weak.clone(); thread::spawn(move || { let t_c = tray_icon::TrayIconEvent::receiver(); let ui_local = u_t2.clone(); loop { if let Ok(e) = t_c.recv() { if let tray_icon::TrayIconEvent::Click { button: tray_icon::MouseButton::Left, .. } = e { let ui_inner = ui_local.clone(); let _ = slint::invoke_from_event_loop(move || { if let Some(uw) = ui_inner.upgrade() { uw.window().show().unwrap(); } }); } } } });
             let _ = Box::leak(Box::new(icon));
             let gtk_t = slint::Timer::default(); gtk_t.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(50), move || { while gtk::events_pending() { gtk::main_iteration_do(false); } });
             Box::leak(Box::new(gtk_t));
@@ -314,14 +250,17 @@ fn main() -> anyhow::Result<()> {
         let sc = Arc::clone(&s_c_ref); 
         let srcc = Arc::clone(&src_c_ref);
         thread::spawn(move || {
-            append_log("Refresh triggered...");
-            let bt = get_bluetooth_devices(); let mut rs = Vec::new(); if let Ok(s) = get_pactl_devices("sinks") { rs.extend(s); }
+            append_log("Refresh started...");
+            let bt = get_bluetooth_devices();
+            append_log(&format!("Found {} bluetooth devices", bt.len()));
+            let mut rs = Vec::new(); if let Ok(s) = get_pactl_devices("sinks") { rs.extend(s); }
+            append_log(&format!("Found {} sinks", rs.len()));
             for b in bt.iter() { let m = b.name.replace("bluez_connect.", "").replace(":", "_").to_lowercase(); if !rs.iter().any(|s| s.name.to_lowercase().contains(&m)) { rs.push(b.clone()); } }
             let mut rsrc = Vec::new(); if let Ok(s) = get_pactl_devices("sources") { rsrc.extend(s); }
+            append_log(&format!("Found {} sources", rsrc.len()));
             for b in bt.iter() { let m = b.name.replace("bluez_connect.", "").replace(":", "_").to_lowercase(); if !rsrc.iter().any(|s| s.name.to_lowercase().contains(&m)) { rsrc.push(b.clone()); } }
             let h_u = c.hide_unknown_bt; let is_u = |desc: &str| { if !h_u { return false; } let d = desc.to_uppercase(); let b = d.replace(" (BLUETOOTH)", "").trim().to_string(); b.len() == 17 && (b.chars().filter(|c| *c == '-').count() == 5 || b.chars().filter(|c| *c == ':').count() == 5) };
-            let excl = c.excluded_devices.clone(); 
-            let f_e = c.filter_enabled;
+            let excl = c.excluded_devices.clone(); let f_e = c.filter_enabled;
             let fsinks: Vec<PactlDevice> = rs.into_iter().filter(|d| (!f_e || !excl.contains(&d.name)) && !is_u(&d.description)).collect();
             let fsrcs: Vec<PactlDevice> = rsrc.into_iter().filter(|d| (!f_e || !excl.contains(&d.name)) && !is_u(&d.description)).collect();
             let mut all_u: Vec<PactlDevice> = Vec::new(); for d in fsinks.iter().chain(fsrcs.iter()) { if !all_u.iter().any(|u| u.name == d.name) { all_u.push(d.clone()); } }
@@ -336,11 +275,10 @@ fn main() -> anyhow::Result<()> {
                 if let Some(idx) = lsrc.and_then(|l| fsrcs.iter().position(|s| s.name == l)) { ui.set_selected_source_index(idx as i32); }
                 else if !fsrcs.is_empty() { ui.set_selected_source_index(0); }
                 *sc.lock().unwrap() = fsinks; *srcc.lock().unwrap() = fsrcs;
-                append_log("Refresh UI update done.");
+                append_log("Refresh done.");
             }});
         });
     };
-    
     let r_init = refresh_fn.clone(); r_init(); ui.on_refresh(refresh_fn.clone());
 
     let c_bt = Arc::clone(&cfg_arc); ui.on_toggle_bluetooth(move |on| { let _ = set_bluetooth_power(on); let mut c = c_bt.lock().unwrap(); c.bluetooth_enabled = on; save_config(&c); });
