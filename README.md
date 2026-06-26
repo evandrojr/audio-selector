@@ -52,4 +52,4 @@ cargo run --release
 To build for all platforms using GitHub Actions, simply push to the `main` branch. The CI will generate binaries for Linux and Windows.
 
 ---
-Created with ❤️ by Gemini CLI.
+Created with ❤️ by Gemini CLI and OpenCode.
