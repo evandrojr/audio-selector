@@ -55,7 +55,7 @@ fn install_app() -> anyhow::Result<()> {
 
 fn load_tray_icon() -> tray_icon::Icon {
     let img = image::open("ui/assets/icon.png").expect("No icon");
-    let img = image::imageops::resize(&img, 64, 64, image::imageops::FilterType::Nearest); // Faster than Lanczos
+    let img = image::imageops::resize(&img, 64, 64, image::imageops::FilterType::Nearest);
     let (w, h) = img.dimensions();
     tray_icon::Icon::from_rgba(img.into_raw(), w, h).expect("Tray icon fail")
 }
@@ -127,12 +127,12 @@ fn main() -> anyhow::Result<()> {
     }
     let start_in_tray = args.iter().any(|x| x == "--tray");
     
-    append_log(&format!("Step 1: Config Load ({:?})", start_time.elapsed()));
     let config_data = load_config();
+    append_log(&format!("Step 1: Config Load Done ({:?})", start_time.elapsed()));
     
-    append_log(&format!("Step 2: UI Creation ({:?})", start_time.elapsed()));
     let ui = AppWindow::new()?;
     let ui_weak = ui.as_weak();
+    append_log(&format!("Step 2: UI Creation Done ({:?})", start_time.elapsed()));
     
     if let (Some(w), Some(h)) = (config_data.window_width, config_data.window_height) {
         ui.window().set_size(slint::PhysicalSize::new(w as u32, h as u32));
@@ -141,7 +141,6 @@ fn main() -> anyhow::Result<()> {
         ui.window().set_position(slint::PhysicalPosition::new(x, y));
     }
     
-    append_log(&format!("Step 3: Translations ({:?})", start_time.elapsed()));
     let t = get_current_translations();
     ui.set_l_title(t.title.into());
     ui.set_l_tab_devices(t.tab_devices.into());
@@ -158,6 +157,7 @@ fn main() -> anyhow::Result<()> {
     ui.set_l_volume(t.volume.into());
     ui.set_l_open_logs(t.open_logs.into());
     #[cfg(target_os = "linux")] ui.set_status(t.status_ready.into());
+    append_log(&format!("Step 3: UI Setup Done ({:?})", start_time.elapsed()));
     
     let cfg_arc = Arc::new(Mutex::new(config_data.clone()));
     {
@@ -168,7 +168,6 @@ fn main() -> anyhow::Result<()> {
         ui.set_hide_unknown_bt(c.hide_unknown_bt);
         
         if !c.cached_sinks.is_empty() || !c.cached_sources.is_empty() {
-            append_log(&format!("Step 4: Load Cache ({:?})", start_time.elapsed()));
             let cached_sinks: Vec<PactlDevice> = c.cached_sinks.iter().map(|d| PactlDevice {
                 name: d.name.clone(),
                 description: d.description.clone(),
@@ -182,40 +181,58 @@ fn main() -> anyhow::Result<()> {
             update_ui_models(&ui, &cached_sinks, &cached_sources, &c);
         }
     }
+    append_log(&format!("Step 4: Load Cache Done ({:?})", start_time.elapsed()));
 
     #[cfg(target_os = "linux")] {
-        append_log(&format!("Step 5: GTK/Tray Init ({:?})", start_time.elapsed()));
-        // CRITICAL: GTK init MUST be on the main thread for reliability and speed
-        if gtk::init().is_ok() {
-            let menu = Menu::new();
-            let q_i = MenuItem::new(t.menu_quit, true, None);
-            let q_id = q_i.id().clone();
-            let _ = menu.append_items(&[&q_i]);
-            if let Ok(icon) = TrayIconBuilder::new().with_menu(Box::new(menu)).with_tooltip(t.title).with_icon(load_tray_icon()).build() {
-                thread::spawn(move || {
+        let ui_weak_tray = ui_weak.clone();
+        let tray_title = t.title.to_string();
+        let menu_quit_text = t.menu_quit.to_string();
+        
+        // Move GTK/Tray Init to a thread to avoid blocking main window display
+        thread::spawn(move || {
+            append_log("Background: GTK init starting...");
+            if gtk::init().is_ok() {
+                let menu = Menu::new();
+                let q_i = MenuItem::new(&menu_quit_text, true, None);
+                let q_id = q_i.id().clone();
+                let _ = menu.append_items(&[&q_i]);
+                
+                // Pre-load icon before builder
+                let icon_res = load_tray_icon();
+                
+                if let Ok(icon) = TrayIconBuilder::new()
+                    .with_menu(Box::new(menu))
+                    .with_tooltip(&tray_title)
+                    .with_icon(icon_res)
+                    .build() {
+                    append_log("Background: Tray icon built.");
+                    
                     let m_c = tray_icon::menu::MenuEvent::receiver();
-                    loop { if let Ok(e) = m_c.recv() { if e.id == q_id { std::process::exit(0); } } }
-                });
-                let u_i = ui_weak.clone();
-                thread::spawn(move || {
+                    thread::spawn(move || {
+                        loop { if let Ok(e) = m_c.recv() { if e.id == q_id { std::process::exit(0); } } }
+                    });
+                    
                     let t_c = tray_icon::TrayIconEvent::receiver();
-                    loop {
-                        if let Ok(e) = t_c.recv() {
-                            if let tray_icon::TrayIconEvent::Click { button: tray_icon::MouseButton::Left, .. } = e {
-                                let ui_inner = u_i.clone();
-                                let _ = slint::invoke_from_event_loop(move || { if let Some(uw) = ui_inner.upgrade() { uw.window().show().unwrap(); } });
+                    let u_i = ui_weak_tray.clone();
+                    thread::spawn(move || {
+                        loop {
+                            if let Ok(e) = t_c.recv() {
+                                if let tray_icon::TrayIconEvent::Click { button: tray_icon::MouseButton::Left, .. } = e {
+                                    let ui_inner = u_i.clone();
+                                    let _ = slint::invoke_from_event_loop(move || { if let Some(uw) = ui_inner.upgrade() { uw.window().show().unwrap(); } });
+                                }
                             }
                         }
+                    });
+                    
+                    let _ = Box::leak(Box::new(icon));
+                    loop { 
+                        while gtk::events_pending() { gtk::main_iteration_do(false); }
+                        thread::sleep(std::time::Duration::from_millis(50));
                     }
-                });
-                let _ = Box::leak(Box::new(icon));
-                let gtk_timer = slint::Timer::default();
-                gtk_timer.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(30), move || { 
-                    while gtk::events_pending() { gtk::main_iteration_do(false); }
-                });
-                Box::leak(Box::new(gtk_timer));
+                }
             }
-        }
+        });
     }
 
     ui.window().on_close_requested(|| { slint::CloseRequestResponse::HideWindow });
@@ -289,7 +306,7 @@ fn main() -> anyhow::Result<()> {
     };
     
     let r_init = refresh_fn.clone();
-    slint::Timer::single_shot(std::time::Duration::from_millis(200), move || { r_init(); });
+    slint::Timer::single_shot(std::time::Duration::from_millis(500), move || { r_init(); });
     ui.on_refresh(refresh_fn.clone());
 
     let c_bt = Arc::clone(&cfg_arc);
@@ -440,7 +457,7 @@ fn main() -> anyhow::Result<()> {
         }
     });
 
-    append_log(&format!("Step 6: Running event loop ({:?})", start_time.elapsed()));
+    append_log(&format!("Step 5: Final run call ({:?})", start_time.elapsed()));
     if !start_in_tray {
         ui.window().show().unwrap();
     }
