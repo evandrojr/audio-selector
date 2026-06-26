@@ -31,7 +31,7 @@ impl PactlDevice {
 #[cfg(target_os = "linux")]
 pub fn get_pactl_devices(target: &str) -> anyhow::Result<Vec<PactlDevice>> {
     // Use timeout command to prevent long hangs if PulseAudio is stuck
-    let output = Command::new("timeout").args(["10s", "pactl", "--format=json", "list", target])
+    let output = Command::new("timeout").args(["3s", "pactl", "--format=json", "list", target])
         .env("LC_ALL", "C")
         .output();
         

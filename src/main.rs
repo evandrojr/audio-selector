@@ -256,15 +256,16 @@ fn main() -> anyhow::Result<()> {
         let srcc = Arc::clone(&src_c_ref);
         thread::spawn(move || {
             append_log("Refresh scan started...");
-            let bt = get_bluetooth_devices();
-            let mut rs = Vec::new();
-            if let Ok(s) = get_pactl_devices("sinks") { rs.extend(s); }
+            let bt_h = thread::spawn(get_bluetooth_devices);
+            let sinks_h = thread::spawn(|| get_pactl_devices("sinks"));
+            let sources_h = thread::spawn(|| get_pactl_devices("sources"));
+            let bt = bt_h.join().unwrap_or_default();
+            let mut rs = sinks_h.join().unwrap_or(Ok(Vec::new())).unwrap_or_default();
+            let mut rsrc = sources_h.join().unwrap_or(Ok(Vec::new())).unwrap_or_default();
             for b in bt.iter() {
                 let m = b.name.replace("bluez_connect.", "").replace(":", "_").to_lowercase();
                 if !rs.iter().any(|s| s.name.to_lowercase().contains(&m)) { rs.push(b.clone()); }
             }
-            let mut rsrc = Vec::new();
-            if let Ok(s) = get_pactl_devices("sources") { rsrc.extend(s); }
             for b in bt.iter() {
                 let m = b.name.replace("bluez_connect.", "").replace(":", "_").to_lowercase();
                 if !rsrc.iter().any(|s| s.name.to_lowercase().contains(&m)) { rsrc.push(b.clone()); }
@@ -299,7 +300,7 @@ fn main() -> anyhow::Result<()> {
     };
     
     let r_init = refresh_fn.clone();
-    slint::Timer::single_shot(std::time::Duration::from_millis(100), move || { r_init(); });
+    slint::Timer::single_shot(std::time::Duration::from_millis(50), move || { r_init(); });
     ui.on_refresh(refresh_fn.clone());
 
     let c_bt = Arc::clone(&cfg_arc);
