@@ -1,0 +1,118 @@
+import { Button, Switch, ComboBox, GroupBox, VerticalBox, HorizontalBox } from "std-widgets.slint";
+
+export component AppWindow inherits Window {
+    title: l_title;
+    icon: @image-url("assets/icon.png");
+    
+    // Using min-width/height allows the window to be resized larger by the user
+    min-width: 500px;
+    min-height: 380px;
+
+    // Callbacks
+    callback refresh();
+    callback sink_changed(int);
+    callback source_changed(int);
+    callback toggle_bluetooth(bool);
+    callback toggle_unified(bool);
+
+    // Localization properties
+    in property <string> l_title: "Audio Selector";
+    in property <string> l_bluetooth: "Bluetooth";
+    in property <string> l_unified: "Use same device for input/output";
+    in property <string> l_output: "Output Device";
+    in property <string> l_input: "Input Device";
+    in property <string> l_audio_device: "Audio Device";
+    in property <string> l_refresh: "Refresh Devices";
+
+    in property <[string]> sink_names: [];
+    in property <[string]> source_names: [];
+    in property <string> status: "Ready";
+    in property <bool> bluetooth_available: true;
+    
+    in-out property <int> selected_sink_index: -1;
+    in-out property <int> selected_source_index: -1;
+    in-out property <bool> unified_mode: true;
+    in-out property <bool> bluetooth_enabled: false;
+
+    VerticalBox {
+        spacing: 15px;
+        padding: 20px;
+
+        HorizontalBox {
+            alignment: space-between;
+            Text { 
+                text: l_bluetooth; 
+                vertical-alignment: center;
+                font-size: 14px;
+            }
+            Switch {
+                checked: bluetooth_enabled;
+                enabled: bluetooth_available;
+                toggled => {
+                    bluetooth_enabled = !bluetooth_enabled;
+                    toggle_bluetooth(bluetooth_enabled);
+                }
+            }
+        }
+
+        HorizontalBox {
+            alignment: space-between;
+            Text { 
+                text: l_unified; 
+                vertical-alignment: center;
+                font-size: 14px;
+            }
+            Switch {
+                checked: unified_mode;
+                toggled => {
+                    unified_mode = !unified_mode;
+                    toggle_unified(unified_mode);
+                }
+            }
+        }
+
+        GroupBox {
+            title: unified_mode ? l_audio_device : l_output;
+            ComboBox {
+                model: sink_names;
+                current-index <=> selected_sink_index;
+                selected => {
+                    sink_changed(selected_sink_index);
+                }
+            }
+        }
+
+        if !unified_mode : GroupBox {
+            title: l_input;
+            ComboBox {
+                model: source_names;
+                current-index <=> selected_source_index;
+                selected => {
+                    source_changed(selected_source_index);
+                }
+            }
+        }
+
+        Rectangle {
+            background: #f0f0f0;
+            border-radius: 4px;
+            height: 40px;
+            Text {
+                text: status;
+                color: #555;
+                font-italic: true;
+                vertical-alignment: center;
+                horizontal-alignment: center;
+                overflow: elide;
+            }
+        }
+
+        HorizontalBox {
+            alignment: center;
+            Button {
+                text: l_refresh;
+                clicked => { refresh(); }
+            }
+        }
+    }
+}

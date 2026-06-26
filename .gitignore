@@ -1,0 +1,16 @@
+# Rust build artifacts
+target/
+
+# Configuration and temporary files
+config.json
+*.log
+
+# IDE specific files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS specific files
+.DS_Store
+Thumbs.db
