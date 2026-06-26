@@ -6,6 +6,52 @@ export struct DeviceToggle {
     excluded: bool,
 }
 
+export component LogWindow inherits Window {
+    title: "Application Logs";
+    icon: @image-url("assets/icon.png");
+    min-width: 600px;
+    min-height: 400px;
+
+    in property <string> log_text: "";
+    in-out property <string> log_search: "";
+    callback refresh_logs();
+
+    VerticalBox {
+        spacing: 10px;
+        padding: 10px;
+        HorizontalBox {
+            spacing: 10px;
+            Text { text: "Search Logs:"; vertical-alignment: center; font-size: 12px; }
+            TextInput {
+                text: log_search;
+                edited => {
+                    log_search = self.text;
+                    refresh_logs();
+                }
+            }
+            Button {
+                text: "Refresh";
+                clicked => { refresh_logs(); }
+            }
+        }
+        Rectangle {
+            border-radius: 4px;
+            border-color: #ddd;
+            border-width: 1px;
+            background: #fafafa;
+            ScrollView {
+                Text {
+                    padding: 10px;
+                    text: log_text;
+                    wrap: word-wrap;
+                    font-size: 11px;
+                    font-family: "monospace";
+                }
+            }
+        }
+    }
+}
+
 export component AppWindow inherits Window {
     title: l_title;
     icon: @image-url("assets/icon.png");
@@ -23,6 +69,7 @@ export component AppWindow inherits Window {
     callback toggle_device_exclusion(string, bool);
     callback toggle_hide_unknown_bt(bool);
     callback sink_volume_changed(int);
+    callback open_logs();
 
     // Localization properties
     in property <string> l_title: "Audio Selector";
@@ -38,6 +85,7 @@ export component AppWindow inherits Window {
     in property <string> l_filter_active: "Enable Excluded Devices";
     in property <string> l_exclude_instruction: "Check devices below to hide them from the main list:";
     in property <string> l_volume: "Volume";
+    in property <string> l_open_logs: "Open Application Logs";
 
     in property <[string]> sink_names: [];
     in property <[string]> source_names: [];
@@ -52,11 +100,6 @@ export component AppWindow inherits Window {
     in-out property <bool> filter_enabled: false;
     in-out property <bool> hide_unknown_bt: false;
     in-out property <int> sink_volume: 50;
-
-    in-out property <bool> show_logs: false;
-    in-out property <string> log_text: "";
-    in-out property <string> log_search: "";
-    callback refresh_logs();
 
     VerticalBox {
         spacing: 15px;
@@ -199,46 +242,11 @@ export component AppWindow inherits Window {
                             }
                         }
 
-                        HorizontalBox {
-                            alignment: space-between;
-                            Text { text: "Show Application Logs"; vertical-alignment: center; font-weight: 700; }
-                            Switch {
-                                checked: show_logs;
-                                toggled => {
-                                    show_logs = !show_logs;
-                                    if (show_logs) { refresh_logs(); }
-                                }
-                            }
-                        }
-
-                        if show_logs : VerticalBox {
-                            spacing: 10px;
-                            HorizontalBox {
-                                spacing: 10px;
-                                Text { text: "Search Logs:"; vertical-alignment: center; font-size: 12px; }
-                                TextInput {
-                                    text: log_search;
-                                    edited => {
-                                        log_search = self.text;
-                                        refresh_logs();
-                                    }
-                                }
-                            }
-                            Rectangle {
-                                border-radius: 4px;
-                                border-color: #ddd;
-                                border-width: 1px;
-                                background: #fafafa;
-                                min-height: 150px;
-                                ScrollView {
-                                    Text {
-                                        padding: 5px;
-                                        text: log_text;
-                                        wrap: word-wrap;
-                                        font-size: 11px;
-                                        font-family: "monospace";
-                                    }
-                                }
+                        VerticalBox {
+                            padding: 10px;
+                            Button {
+                                text: l_open_logs;
+                                clicked => { open_logs(); }
                             }
                         }
                     }
