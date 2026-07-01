@@ -116,7 +116,17 @@ fn update_ui_models(ui: &AppWindow, sinks: &[PactlDevice], sources: &[PactlDevic
         fsinks.iter().map(|d| d.description.as_str().into()).collect::<Vec<SharedString>>()
     ))));
 
-    if let Some(idx) = config.last_sink.as_ref().and_then(|l| fsinks.iter().position(|s| &s.name == l)) {
+    let find_idx = |list: &[PactlDevice], saved: &Option<String>| {
+        if let Some(l) = saved {
+            if let Some(idx) = list.iter().position(|s| &s.name == l) { return Some(idx); }
+            if let Some(smac) = get_bluetooth_mac(l) {
+                return list.iter().position(|s| get_bluetooth_mac(&s.name) == Some(smac.clone()));
+            }
+        }
+        None
+    };
+
+    if let Some(idx) = find_idx(&fsinks, &config.last_sink) {
         ui.set_selected_sink_index(idx as i32);
         ui.set_sink_volume(fsinks[idx].get_volume_percent());
     } else if !fsinks.is_empty() {
@@ -128,7 +138,7 @@ fn update_ui_models(ui: &AppWindow, sinks: &[PactlDevice], sources: &[PactlDevic
         fsrcs.iter().map(|d| d.description.as_str().into()).collect::<Vec<SharedString>>()
     ))));
 
-    if let Some(idx) = config.last_source.as_ref().and_then(|l| fsrcs.iter().position(|s| &s.name == l)) {
+    if let Some(idx) = find_idx(&fsrcs, &config.last_source) {
         ui.set_selected_source_index(idx as i32);
     } else if !fsrcs.is_empty() {
         ui.set_selected_source_index(0);
@@ -339,14 +349,17 @@ fn main() -> anyhow::Result<()> {
                     if let Some(ls) = last_sink {
                         append_log(&format!("Auto-Restore: Checking sink: {}", ls));
                         let sinks = sc.lock().unwrap();
-                        if let Some(idx) = sinks.iter().position(|s| s.name == ls) {
-                            append_log("Auto-Restore: Exact sink match found.");
+                        let mac = get_bluetooth_mac(&ls);
+                        
+                        if let Some(idx) = sinks.iter().position(|s| s.name == ls || (mac.is_some() && get_bluetooth_mac(&s.name) == mac)) {
+                            let matched_name = sinks[idx].name.clone();
+                            append_log(&format!("Auto-Restore: Sink match found: {}", matched_name));
                             let _ = slint::invoke_from_event_loop(move || {
                                 if let Some(ua) = u_auto.upgrade() { ua.invoke_sink_changed(idx as i32); }
                             });
-                        } else if let Some(mac) = get_bluetooth_mac(&ls) {
-                            append_log(&format!("Auto-Restore: Sink missing, attempting BT reconnect for MAC: {}", mac));
-                            let target = format!("bluez_connect.{}", mac);
+                        } else if let Some(smac) = mac {
+                            append_log(&format!("Auto-Restore: Sink missing, attempting BT reconnect for MAC: {}", smac));
+                            let target = format!("bluez_connect.{}", smac);
                             if let Some(idx) = sinks.iter().position(|s| s.name == target) {
                                 let _ = slint::invoke_from_event_loop(move || {
                                     if let Some(ua) = u_auto.upgrade() { ua.invoke_sink_changed(idx as i32); }
@@ -359,16 +372,19 @@ fn main() -> anyhow::Result<()> {
                     if let Some(lsrc) = last_source {
                         append_log(&format!("Auto-Restore: Checking source: {}", lsrc));
                         let sources = srcc.lock().unwrap();
-                        if let Some(idx) = sources.iter().position(|s| s.name == lsrc) {
-                            append_log("Auto-Restore: Exact source match found.");
+                        let mac = get_bluetooth_mac(&lsrc);
+
+                        if let Some(idx) = sources.iter().position(|s| s.name == lsrc || (mac.is_some() && get_bluetooth_mac(&s.name) == mac)) {
+                            let matched_name = sources[idx].name.clone();
+                            append_log(&format!("Auto-Restore: Source match found: {}", matched_name));
                             let _ = slint::invoke_from_event_loop(move || {
                                 if let Some(ua) = u_auto_src.upgrade() {
                                     if !ua.get_unified_mode() { ua.invoke_source_changed(idx as i32); }
                                 }
                             });
-                        } else if let Some(mac) = get_bluetooth_mac(&lsrc) {
-                            append_log(&format!("Auto-Restore: Source missing, attempting BT reconnect for MAC: {}", mac));
-                            let target = format!("bluez_connect.{}", mac);
+                        } else if let Some(smac) = mac {
+                            append_log(&format!("Auto-Restore: Source missing, attempting BT reconnect for MAC: {}", smac));
+                            let target = format!("bluez_connect.{}", smac);
                             if let Some(idx) = sources.iter().position(|s| s.name == target) {
                                 let _ = slint::invoke_from_event_loop(move || {
                                     if let Some(ua) = u_auto_src.upgrade() {
@@ -644,9 +660,16 @@ fn main() -> anyhow::Result<()> {
                     let sinks = s.lock().unwrap();
                     if (idx as usize) < sinks.len() {
                         let n = &sinks[idx as usize].name;
+                        append_log(&format!("Volume Change: {} -> {}%", n, v));
                         // Only block if it's the connection proxy (bluez_connect.), 
                         // allow actual sinks (bluez_sink, bluez_output, etc.)
-                        if !n.starts_with("bluez_connect.") { let _ = set_sink_volume(n, v); }
+                        if !n.starts_with("bluez_connect.") { 
+                            if let Err(e) = set_sink_volume(n, v) {
+                                append_log(&format!("Volume Change Error: {}", e));
+                            }
+                        } else {
+                            append_log("Volume Change: Ignored for connection proxy.");
+                        }
                     }
                 });
             }
