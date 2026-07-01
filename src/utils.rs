@@ -39,3 +39,17 @@ pub fn get_log_content(search: &str) -> String {
     }
     "No logs.".to_string()
 }
+
+pub fn get_bluetooth_mac(name: &str) -> Option<String> {
+    if name.starts_with("bluez_connect.") {
+        Some(name.replace("bluez_connect.", ""))
+    } else if name.contains("bluez_") {
+        let parts: Vec<&str> = name.split('.').collect();
+        for p in parts {
+            if p.chars().filter(|c| *c == '_').count() == 5 {
+                return Some(p.replace("_", ":"));
+            }
+        }
+        None
+    } else { None }
+}

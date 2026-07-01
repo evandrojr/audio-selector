@@ -27,7 +27,7 @@ use crate::audio::{get_pactl_devices, apply_device_change, set_sink_volume, Pact
 use crate::bluetooth::{get_bluetooth_devices, set_bluetooth_power};
 use crate::config::{load_config, save_config, Config, CachedDevice};
 use crate::i18n::get_current_translations;
-use crate::utils::{append_log, get_log_content};
+use crate::utils::{append_log, get_log_content, get_bluetooth_mac};
 
 fn install_app() -> anyhow::Result<()> {
     append_log("Installing application...");
@@ -202,12 +202,12 @@ fn main() -> anyhow::Result<()> {
                 name: d.name.clone(),
                 description: d.description.clone(),
                 volume: Some(serde_json::json!({"0": {"value_percent": format!("{}%", d.volume_percent)}}))
-            }).filter(|d| c.bluetooth_enabled || !d.name.contains("bluez_connect.")).collect();
+            }).filter(|d| c.bluetooth_enabled || (!d.name.contains("bluez_connect.") && !d.name.contains("bluez_sink"))).collect();
             let cached_sources: Vec<PactlDevice> = c.cached_sources.iter().map(|d| PactlDevice {
                 name: d.name.clone(),
                 description: d.description.clone(),
                 volume: None
-            }).filter(|d| c.bluetooth_enabled || !d.name.contains("bluez_connect.")).collect();
+            }).filter(|d| c.bluetooth_enabled || (!d.name.contains("bluez_connect.") && !d.name.contains("bluez_source") && !d.name.contains("bluez_input"))).collect();
             update_ui_models(&ui, &cached_sinks, &cached_sources, &c);
         }
     }
@@ -310,8 +310,8 @@ fn main() -> anyhow::Result<()> {
                     let mut final_sinks = rs_c.clone();
                     let mut final_sources = rsrc_c.clone();
                     if !c.bluetooth_enabled {
-                        final_sinks.retain(|d| !d.name.contains("bluez_connect."));
-                        final_sources.retain(|d| !d.name.contains("bluez_connect."));
+                        final_sinks.retain(|d| !d.name.contains("bluez_connect.") && !d.name.contains("bluez_sink"));
+                        final_sources.retain(|d| !d.name.contains("bluez_connect.") && !d.name.contains("bluez_source") && !d.name.contains("bluez_input"));
                     }
                     if !final_sinks.is_empty() || !final_sources.is_empty() {
                         update_ui_models(&ui, &final_sinks, &final_sources, &c);
@@ -330,6 +330,54 @@ fn main() -> anyhow::Result<()> {
                     *sc.lock().unwrap() = final_sinks;
                     *srcc.lock().unwrap() = final_sources;
                     append_log("Scan: Completed and UI updated.");
+
+                    // Auto-restore last devices
+                    let last_sink = c.last_sink.clone();
+                    let last_source = c.last_source.clone();
+                    let u_auto = u_w.clone();
+                    
+                    if let Some(ls) = last_sink {
+                        append_log(&format!("Auto-Restore: Checking sink: {}", ls));
+                        let sinks = sc.lock().unwrap();
+                        if let Some(idx) = sinks.iter().position(|s| s.name == ls) {
+                            append_log("Auto-Restore: Exact sink match found.");
+                            let _ = slint::invoke_from_event_loop(move || {
+                                if let Some(ua) = u_auto.upgrade() { ua.invoke_sink_changed(idx as i32); }
+                            });
+                        } else if let Some(mac) = get_bluetooth_mac(&ls) {
+                            append_log(&format!("Auto-Restore: Sink missing, attempting BT reconnect for MAC: {}", mac));
+                            let target = format!("bluez_connect.{}", mac);
+                            if let Some(idx) = sinks.iter().position(|s| s.name == target) {
+                                let _ = slint::invoke_from_event_loop(move || {
+                                    if let Some(ua) = u_auto.upgrade() { ua.invoke_sink_changed(idx as i32); }
+                                });
+                            }
+                        }
+                    }
+                    
+                    let u_auto_src = u_w.clone();
+                    if let Some(lsrc) = last_source {
+                        append_log(&format!("Auto-Restore: Checking source: {}", lsrc));
+                        let sources = srcc.lock().unwrap();
+                        if let Some(idx) = sources.iter().position(|s| s.name == lsrc) {
+                            append_log("Auto-Restore: Exact source match found.");
+                            let _ = slint::invoke_from_event_loop(move || {
+                                if let Some(ua) = u_auto_src.upgrade() {
+                                    if !ua.get_unified_mode() { ua.invoke_source_changed(idx as i32); }
+                                }
+                            });
+                        } else if let Some(mac) = get_bluetooth_mac(&lsrc) {
+                            append_log(&format!("Auto-Restore: Source missing, attempting BT reconnect for MAC: {}", mac));
+                            let target = format!("bluez_connect.{}", mac);
+                            if let Some(idx) = sources.iter().position(|s| s.name == target) {
+                                let _ = slint::invoke_from_event_loop(move || {
+                                    if let Some(ua) = u_auto_src.upgrade() {
+                                        if !ua.get_unified_mode() { ua.invoke_source_changed(idx as i32); }
+                                    }
+                                });
+                            }
+                        }
+                    }
                 }
             });
         });
@@ -340,13 +388,18 @@ fn main() -> anyhow::Result<()> {
     ui.on_refresh(refresh_fn.clone());
 
     let c_bt = Arc::clone(&cfg_arc);
+    let r_bt = refresh_fn.clone();
     ui.on_toggle_bluetooth(move |on| {
         let c = c_bt.clone();
+        let r = r_bt.clone();
         thread::spawn(move || {
             let _ = set_bluetooth_power(on);
-            let mut cfg = c.lock().unwrap();
-            cfg.bluetooth_enabled = on;
-            save_config(&cfg);
+            {
+                let mut cfg = c.lock().unwrap();
+                cfg.bluetooth_enabled = on;
+                save_config(&cfg);
+            }
+            r();
         });
     });
 
@@ -398,6 +451,7 @@ fn main() -> anyhow::Result<()> {
                     let u_a = ui_weak_handler.clone();
                     let sr_a = Arc::clone(&src_c);
                     let cf_a = Arc::clone(&cfg_handler);
+                    let current_vol = u.get_sink_volume();
                     u.set_sink_volume(sks[s_i as usize].get_volume_percent());
                     thread::spawn(move || {
                         let ta = get_current_translations();
@@ -406,19 +460,77 @@ fn main() -> anyhow::Result<()> {
                             let mac = n.replace("bluez_connect.", "");
                             let ui_conn = u_a.clone();
                             let _ = slint::invoke_from_event_loop(move || { if let Some(ua) = ui_conn.upgrade() { ua.set_status(ta.status_connecting.into()); } });
-                            let _ = Command::new("bluetoothctl").args(["connect", &mac]).status();
-                            thread::sleep(std::time::Duration::from_millis(2000));
-                            if let Ok(p) = get_pactl_devices("sinks") {
-                                if let Some(f) = p.iter().find(|s| s.name.contains(&mac.replace(":", "_"))) { an = f.name.clone(); }
+                            
+                            let mut found = false;
+                            append_log(&format!("BT: Starting connection sequence for {}", mac));
+                            
+                            for attempt in 1..=3 {
+                                append_log(&format!("BT: Connection attempt {}/3 for {}", attempt, mac));
+                                
+                                if attempt == 2 {
+                                    append_log("BT: Attempting trust and brief scan to wake up device...");
+                                    let _ = Command::new("bluetoothctl").args(["trust", &mac]).status();
+                                    let _ = Command::new("bluetoothctl").args(["scan", "on"]).spawn();
+                                    thread::sleep(std::time::Duration::from_millis(1500));
+                                    let _ = Command::new("bluetoothctl").args(["scan", "off"]).status();
+                                }
+
+                                let output = Command::new("bluetoothctl").args(["connect", &mac]).output();
+                                match output {
+                                    Ok(o) if o.status.success() => {
+                                        append_log("BT: bluetoothctl connect returned success.");
+                                    }
+                                    Ok(o) => {
+                                        let out = String::from_utf8_lossy(&o.stdout);
+                                        let err = String::from_utf8_lossy(&o.stderr);
+                                        append_log(&format!("BT: connect failed. Out: {} Err: {}", out.trim(), err.trim()));
+                                    }
+                                    Err(e) => {
+                                        append_log(&format!("BT: Failed to execute bluetoothctl: {}", e));
+                                    }
+                                }
+
+                                // Give PulseAudio/PipeWire time to see the device
+                                thread::sleep(std::time::Duration::from_millis(1500 * attempt as u64));
+                                
+                                if let Ok(p) = get_pactl_devices("sinks") {
+                                    if let Some(f) = p.iter().find(|s| s.name.contains(&mac.replace(":", "_"))) { 
+                                        an = f.name.clone(); 
+                                        found = true;
+                                        append_log(&format!("BT: Device found in pactl sinks: {}", an));
+                                        break;
+                                    }
+                                }
+                                append_log("BT: Device not yet in pactl sinks.");
+                            }
+
+                            let ui_status = u_a.clone();
+                            let _ = slint::invoke_from_event_loop(move || {
+                                if let Some(ua) = ui_status.upgrade() {
+                                    let t = get_current_translations();
+                                    ua.set_status((if found { t.status_connected } else { t.status_failed }).into());
+                                    if found { ua.invoke_refresh(); }
+                                }
+                            });
+                            
+                            if !found { 
+                                append_log("BT: Connection failed after all attempts.");
+                                return; 
                             }
                         }
                         let _ = apply_device_change("sinks", &an);
+                        let _ = set_sink_volume(&an, current_vol);
+                        
                         let mut c = cf_a.lock().unwrap();
                         c.last_sink = Some(an.clone());
                         let ui_uni = u_a.clone();
                         if let Some(ua) = ui_uni.upgrade() {
                             if ua.get_unified_mode() {
-                                let base = an.replace("bluez_sink", "").replace(".a2dp_sink", "").replace(".hifi", "");
+                                let base = if let Some(mac) = get_bluetooth_mac(&an) {
+                                    mac.replace(":", "_")
+                                } else {
+                                    an.replace("alsa_output", "alsa_input").replace(".sink", ".source")
+                                };
                                 let src = sr_a.lock().unwrap();
                                 for s in src.iter() {
                                     if s.name.contains(&base) {
@@ -448,10 +560,62 @@ fn main() -> anyhow::Result<()> {
                             let mac = n.replace("bluez_connect.", "");
                             let ui_conn = u_a.clone();
                             let _ = slint::invoke_from_event_loop(move || { if let Some(ua) = ui_conn.upgrade() { ua.set_status(ta.status_connecting.into()); } });
-                            let _ = Command::new("bluetoothctl").args(["connect", &mac]).status();
-                            thread::sleep(std::time::Duration::from_millis(2000));
-                            if let Ok(p) = get_pactl_devices("sources") {
-                                if let Some(f) = p.iter().find(|s| s.name.contains(&mac.replace(":", "_"))) { an = f.name.clone(); }
+                            
+                            append_log(&format!("BT (Source): Starting connection sequence for {}", mac));
+                            
+                            let mut found = false;
+                            for attempt in 1..=3 {
+                                append_log(&format!("BT (Source): Connection attempt {}/3 for {}", attempt, mac));
+
+                                if attempt == 2 {
+                                    append_log("BT (Source): Attempting trust and brief scan to wake up device...");
+                                    let _ = Command::new("bluetoothctl").args(["trust", &mac]).status();
+                                    let _ = Command::new("bluetoothctl").args(["scan", "on"]).spawn();
+                                    thread::sleep(std::time::Duration::from_millis(1500));
+                                    let _ = Command::new("bluetoothctl").args(["scan", "off"]).status();
+                                }
+
+                                let output = Command::new("bluetoothctl").args(["connect", &mac]).output();
+                                match output {
+                                    Ok(o) if o.status.success() => {
+                                        append_log("BT (Source): bluetoothctl connect returned success.");
+                                    }
+                                    Ok(o) => {
+                                        let out = String::from_utf8_lossy(&o.stdout);
+                                        let err = String::from_utf8_lossy(&o.stderr);
+                                        append_log(&format!("BT (Source): connect failed. Out: {} Err: {}", out.trim(), err.trim()));
+                                    }
+                                    Err(e) => {
+                                        append_log(&format!("BT (Source): Failed to execute bluetoothctl: {}", e));
+                                    }
+                                }
+
+                                // Give PulseAudio/PipeWire time to see the device
+                                thread::sleep(std::time::Duration::from_millis(1500 * attempt as u64));
+                                
+                                if let Ok(p) = get_pactl_devices("sources") {
+                                    if let Some(f) = p.iter().find(|s| s.name.contains(&mac.replace(":", "_"))) { 
+                                        an = f.name.clone(); 
+                                        found = true;
+                                        append_log(&format!("BT (Source): Device found in pactl sources: {}", an));
+                                        break;
+                                    }
+                                }
+                                append_log("BT (Source): Device not yet in pactl sources.");
+                            }
+
+                            let ui_status = u_a.clone();
+                            let _ = slint::invoke_from_event_loop(move || {
+                                if let Some(ua) = ui_status.upgrade() {
+                                    let t = get_current_translations();
+                                    ua.set_status((if found { t.status_connected } else { t.status_failed }).into());
+                                    if found { ua.invoke_refresh(); }
+                                }
+                            });
+                            
+                            if !found { 
+                                append_log("BT (Source): Connection failed after all attempts.");
+                                return; 
                             }
                         }
                         let _ = apply_device_change("sources", &an);
@@ -488,7 +652,7 @@ fn main() -> anyhow::Result<()> {
     });
 
     ui.run()?;
-    
+
     append_log("Application shutting down.");
     let mut c = cfg_arc.lock().unwrap();
     let sz = ui.window().size();
@@ -500,4 +664,4 @@ fn main() -> anyhow::Result<()> {
     save_config(&c);
     append_log("Shutdown complete.");
     Ok(())
-}
+    }

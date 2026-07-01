@@ -63,7 +63,9 @@ pub fn get_pactl_devices(_: &str) -> anyhow::Result<Vec<PactlDevice>> { Ok(Vec::
 
 #[cfg(target_os = "linux")]
 pub fn apply_device_change(target: &str, name: &str) -> anyhow::Result<()> {
-    let _ = Command::new("timeout").args(["5s", "pactl", "set-default-sink", name]).env("LC_ALL", "C").status();
+    let default_cmd = if target == "sinks" { "set-default-sink" } else { "set-default-source" };
+    let _ = Command::new("timeout").args(["5s", "pactl", default_cmd, name]).env("LC_ALL", "C").status();
+    
     let cmd = if target == "sinks" { "move-sink-input" } else { "move-source-output" };
     let list_cmd = if target == "sinks" { "sink-inputs" } else { "source-outputs" };
     

@@ -39,8 +39,10 @@ export component LogWindow inherits Window {
             border-color: #ddd;
             border-width: 1px;
             background: #fafafa;
+            vertical-stretch: 1;
             ScrollView {
-                Text {
+                viewport-height: log_text_item.preferred-height;
+                log_text_item := Text {
                     padding: 10px;
                     text: log_text;
                     wrap: word-wrap;
