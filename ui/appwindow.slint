@@ -72,6 +72,7 @@ export component AppWindow inherits Window {
     callback toggle_hide_unknown_bt(bool);
     callback sink_volume_changed(int);
     callback open_logs();
+    callback run_diagnostics();
     callback install_app();
     callback open_url(string);
 
@@ -91,12 +92,21 @@ export component AppWindow inherits Window {
     in property <string> l_exclude_instruction: "Check devices below to hide them from the main list:";
     in property <string> l_volume: "Volume";
     in property <string> l_open_logs: "Open Application Logs";
-    in property <string> l_dev_info: "Developer: @S932743005";
+    in property <string> l_dev_info: "Developer: Evandro Jr";
     in property <string> l_github: "GitHub";
     in property <string> l_website: "Website";
     in property <string> l_install_prompt: "Would you like to install?";
     in property <string> l_install_now: "Install Now";
     in property <string> l_maybe_later: "Maybe Later";
+    in property <string> l_run_diagnostics: "Run System Diagnostics";
+    in property <string> l_diag_title: "System Diagnostics";
+    in property <string> l_diag_pactl: "PulseAudio Tool (pactl)";
+    in property <string> l_diag_btctl: "Bluetooth Tool (bluetoothctl)";
+    in property <string> l_diag_audio_svc: "Audio Service (Pulse/PipeWire)";
+    in property <string> l_diag_bt_svc: "Bluetooth Service (bluez)";
+    in property <string> l_diag_ok: "OK";
+    in property <string> l_diag_missing: "MISSING";
+    in property <string> l_diag_inactive: "INACTIVE";
 
     in property <[string]> sink_names: [];
     in property <[string]> source_names: [];
@@ -104,6 +114,11 @@ export component AppWindow inherits Window {
     in property <string> status: "Ready";
     in property <bool> bluetooth_available: true;
     in-out property <bool> show_install_prompt: false;
+    in-out property <bool> show_diag_results: false;
+    in property <string> diag_pactl_status: "OK";
+    in property <string> diag_btctl_status: "OK";
+    in property <string> diag_audio_svc_status: "OK";
+    in property <string> diag_bt_svc_status: "OK";
     
     in-out property <int> selected_sink_index: -1;
     in-out property <int> selected_source_index: -1;
@@ -256,6 +271,11 @@ export component AppWindow inherits Window {
 
                         VerticalBox {
                             padding: 10px;
+                            spacing: 10px;
+                            Button {
+                                text: l_run_diagnostics;
+                                clicked => { run_diagnostics(); }
+                            }
                             Button {
                                 text: l_open_logs;
                                 clicked => { open_logs(); }
@@ -336,6 +356,77 @@ export component AppWindow inherits Window {
             Button {
                 text: l_refresh;
                 clicked => { refresh(); }
+            }
+        }
+    }
+
+    if show_diag_results : Rectangle {
+        background: #00000088;
+        TouchArea { } 
+        
+        Rectangle {
+            width: 80%;
+            background: white;
+            border-radius: 8px;
+            border-width: 1px;
+            border-color: #ccc;
+            
+            VerticalBox {
+                padding: 20px;
+                spacing: 15px;
+                
+                Text {
+                    text: l_diag_title;
+                    font-size: 18px;
+                    font-weight: 700;
+                    horizontal-alignment: center;
+                }
+                
+                VerticalBox {
+                    spacing: 10px;
+                    
+                    HorizontalBox {
+                        alignment: space-between;
+                        Text { text: l_diag_pactl; }
+                        Text { 
+                            text: diag_pactl_status; 
+                            color: diag_pactl_status == l_diag_ok ? green : red;
+                            font-weight: 700;
+                        }
+                    }
+                    HorizontalBox {
+                        alignment: space-between;
+                        Text { text: l_diag_btctl; }
+                        Text { 
+                            text: diag_btctl_status; 
+                            color: diag_btctl_status == l_diag_ok ? green : red;
+                            font-weight: 700;
+                        }
+                    }
+                    HorizontalBox {
+                        alignment: space-between;
+                        Text { text: l_diag_audio_svc; }
+                        Text { 
+                            text: diag_audio_svc_status; 
+                            color: diag_audio_svc_status == l_diag_ok ? green : red;
+                            font-weight: 700;
+                        }
+                    }
+                    HorizontalBox {
+                        alignment: space-between;
+                        Text { text: l_diag_bt_svc; }
+                        Text { 
+                            text: diag_bt_svc_status; 
+                            color: diag_bt_svc_status == l_diag_ok ? green : red;
+                            font-weight: 700;
+                        }
+                    }
+                }
+                
+                Button {
+                    text: "OK";
+                    clicked => { show_diag_results = false; }
+                }
             }
         }
     }

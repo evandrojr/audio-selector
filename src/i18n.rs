@@ -29,6 +29,15 @@ pub struct Translations {
     pub install_prompt: &'static str,
     pub install_now: &'static str,
     pub maybe_later: &'static str,
+    pub run_diagnostics: &'static str,
+    pub diag_title: &'static str,
+    pub diag_pactl: &'static str,
+    pub diag_bluetoothctl: &'static str,
+    pub diag_service_audio: &'static str,
+    pub diag_service_bt: &'static str,
+    pub diag_ok: &'static str,
+    pub diag_missing: &'static str,
+    pub diag_inactive: &'static str,
 }
 
 pub const EN: Translations = Translations {
@@ -43,6 +52,15 @@ pub const EN: Translations = Translations {
     tab_about: "About", dev_info: "Developer: Evandro Jr", github: "GitHub", website: "Website",
     install_prompt: "Would you like to install Audio Selector to your system? This will add it to your applications menu and autostart.",
     install_now: "Install Now", maybe_later: "Maybe Later",
+    run_diagnostics: "Run System Diagnostics",
+    diag_title: "System Diagnostics",
+    diag_pactl: "PulseAudio Tool (pactl)",
+    diag_bluetoothctl: "Bluetooth Tool (bluetoothctl)",
+    diag_service_audio: "Audio Service (Pulse/PipeWire)",
+    diag_service_bt: "Bluetooth Service (bluez)",
+    diag_ok: "OK",
+    diag_missing: "MISSING",
+    diag_inactive: "INACTIVE",
 };
 
 pub const PT: Translations = Translations {
@@ -57,6 +75,15 @@ pub const PT: Translations = Translations {
     tab_about: "Sobre", dev_info: "Desenvolvedor: Evandro Jr", github: "GitHub", website: "Site",
     install_prompt: "Deseja instalar o Seletor de Áudio no seu sistema? Isso o adicionará ao menu de aplicativos e ao início automático.",
     install_now: "Instalar Agora", maybe_later: "Talvez Depois",
+    run_diagnostics: "Executar Diagnóstico do Sistema",
+    diag_title: "Diagnóstico do Sistema",
+    diag_pactl: "Ferramenta PulseAudio (pactl)",
+    diag_bluetoothctl: "Ferramenta Bluetooth (bluetoothctl)",
+    diag_service_audio: "Serviço de Áudio (Pulse/PipeWire)",
+    diag_service_bt: "Serviço Bluetooth (bluez)",
+    diag_ok: "OK",
+    diag_missing: "FALTANDO",
+    diag_inactive: "INATIVO",
 };
 
 pub const ES: Translations = Translations {
@@ -70,8 +97,18 @@ pub const ES: Translations = Translations {
     volume: "Volumen", menu_quit: "Salir", menu_show: "Mostrar", open_logs: "Abrir Logs de la Aplicación",
     tab_about: "Acerca de", dev_info: "Desarrollador: Evandro Jr", github: "GitHub", website: "Sitio web",
     install_prompt: "¿Desea instalar Selector de Audio en su sistema? Esto lo agregará al menu de aplicaciones y al inicio automático.",
-    install_now: "Instalar Ahora", maybe_later: "Tal vez después",
-};
+    install_now: "Instalar Agora", maybe_later: "Talvez Depois",
+    run_diagnostics: "Executar Diagnóstico do Sistema",
+    diag_title: "Diagnóstico do Sistema",
+    diag_pactl: "Ferramenta PulseAudio (pactl)",
+    diag_bluetoothctl: "Ferramenta Bluetooth (bluetoothctl)",
+    diag_service_audio: "Serviço de Áudio (Pulse/PipeWire)",
+    diag_service_bt: "Serviço Bluetooth (bluez)",
+    diag_ok: "OK",
+    diag_missing: "FALTANDO",
+    diag_inactive: "INATIVO",
+    };
+
 
 pub const FR: Translations = Translations {
     title: "Sélecteur d'Audio", tab_devices: "Appareils", advanced_options: "Options Avancées",
@@ -85,6 +122,15 @@ pub const FR: Translations = Translations {
     tab_about: "À propos", dev_info: "Développeur: Evandro Jr", github: "GitHub", website: "Site web",
     install_prompt: "Souhaitez-vous installer le Sélecteur d'Audio sur votre système? Cela l'ajoutera ao menu des applications et au démarrage automatique.",
     install_now: "Installer Maintenant", maybe_later: "Peut-être plus tard",
+    run_diagnostics: "Lancer le Diagnostic du Système",
+    diag_title: "Diagnostic du Système",
+    diag_pactl: "Outil PulseAudio (pactl)",
+    diag_bluetoothctl: "Outil Bluetooth (bluetoothctl)",
+    diag_service_audio: "Service Audio (Pulse/PipeWire)",
+    diag_service_bt: "Service Bluetooth (bluez)",
+    diag_ok: "OK",
+    diag_missing: "MANQUANT",
+    diag_inactive: "INACTIF",
 };
 
 pub const DE: Translations = Translations {
@@ -99,6 +145,15 @@ pub const DE: Translations = Translations {
     tab_about: "Über", dev_info: "Entwickler: Evandro Jr", github: "GitHub", website: "Webseite",
     install_prompt: "Möchten Sie den Audio-Selector auf Ihrem System installieren? Dies fügt ihn zum Anwendungsmenü e zum Autostart hinzu.",
     install_now: "Jetzt installieren", maybe_later: "Vielleicht später",
+    run_diagnostics: "Systemdiagnose ausführen",
+    diag_title: "Systemdiagnose",
+    diag_pactl: "PulseAudio Tool (pactl)",
+    diag_bluetoothctl: "Bluetooth Tool (bluetoothctl)",
+    diag_service_audio: "Audiodienst (Pulse/PipeWire)",
+    diag_service_bt: "Bluetoothdienst (bluez)",
+    diag_ok: "OK",
+    diag_missing: "FEHLT",
+    diag_inactive: "INAKTIV",
 };
 
 pub const IT: Translations = Translations {
@@ -113,6 +168,15 @@ pub const IT: Translations = Translations {
     tab_about: "Informazioni", dev_info: "Sviluppatore: Evandro Jr", github: "GitHub", website: "Sito web",
     install_prompt: "Vuoi installare Selettore Audio sul tuo sistema? Questo lo aggiungerà al menu delle applicazioni e all'avvio automatico.",
     install_now: "Installa Ora", maybe_later: "Forse più tardi",
+    run_diagnostics: "Esegui Diagnostica di Sistema",
+    diag_title: "Diagnostica di Sistema",
+    diag_pactl: "Strumento PulseAudio (pactl)",
+    diag_bluetoothctl: "Strumento Bluetooth (bluetoothctl)",
+    diag_service_audio: "Servizio Audio (Pulse/PipeWire)",
+    diag_service_bt: "Servizio Bluetooth (bluez)",
+    diag_ok: "OK",
+    diag_missing: "MANCANTE",
+    diag_inactive: "INATTIVO",
 };
 
 pub fn get_current_translations() -> &'static Translations {

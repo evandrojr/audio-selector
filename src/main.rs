@@ -207,6 +207,15 @@ fn main() -> anyhow::Result<()> {
     ui.set_l_install_prompt(t.install_prompt.into());
     ui.set_l_install_now(t.install_now.into());
     ui.set_l_maybe_later(t.maybe_later.into());
+    ui.set_l_run_diagnostics(t.run_diagnostics.into());
+    ui.set_l_diag_title(t.diag_title.into());
+    ui.set_l_diag_pactl(t.diag_pactl.into());
+    ui.set_l_diag_btctl(t.diag_bluetoothctl.into());
+    ui.set_l_diag_audio_svc(t.diag_service_audio.into());
+    ui.set_l_diag_bt_svc(t.diag_service_bt.into());
+    ui.set_l_diag_ok(t.diag_ok.into());
+    ui.set_l_diag_missing(t.diag_missing.into());
+    ui.set_l_diag_inactive(t.diag_inactive.into());
     #[cfg(target_os = "linux")] ui.set_status(t.status_ready.into());
     
     // Check if installed
@@ -337,6 +346,27 @@ fn main() -> anyhow::Result<()> {
 
     ui.on_open_url(|url| {
         let _ = Command::new("xdg-open").arg(url.as_str()).status();
+    });
+
+    let ui_diag = ui.as_weak();
+    ui.on_run_diagnostics(move || {
+        if let Some(u) = ui_diag.upgrade() {
+            let t = get_current_translations();
+            
+            // Check dependencies
+            let pactl_ok = Command::new("which").arg("pactl").status().map(|s| s.success()).unwrap_or(false);
+            let btctl_ok = Command::new("which").arg("bluetoothctl").status().map(|s| s.success()).unwrap_or(false);
+            
+            // Check services
+            let audio_svc_ok = Command::new("pactl").arg("info").status().map(|s| s.success()).unwrap_or(false);
+            let bt_svc_ok = Command::new("bluetoothctl").arg("show").output().map(|o| o.status.success() && !String::from_utf8_lossy(&o.stdout).contains("No default controller available")).unwrap_or(false);
+
+            u.set_diag_pactl_status((if pactl_ok { t.diag_ok } else { t.diag_missing }).into());
+            u.set_diag_btctl_status((if btctl_ok { t.diag_ok } else { t.diag_missing }).into());
+            u.set_diag_audio_svc_status((if audio_svc_ok { t.diag_ok } else { t.diag_inactive }).into());
+            u.set_diag_bt_svc_status((if bt_svc_ok { t.diag_ok } else { t.diag_inactive }).into());
+            u.set_show_diag_results(true);
+        }
     });
 
     let sinks_cache = Arc::new(Mutex::new(Vec::<PactlDevice>::new())); 
