@@ -240,16 +240,18 @@ fn main() -> anyhow::Result<()> {
         let ui_weak_tray = ui_weak.clone();
         let tray_title = t.title.to_string();
         let menu_quit_text = t.menu_quit.to_string();
+        let menu_show_text = t.menu_show.to_string();
         
         thread::spawn(move || {
             append_log("Initializing system tray in background...");
             if gtk::init().is_ok() {
                 let menu = Menu::new();
+                let s_i = MenuItem::new(&menu_show_text, true, None);
+                let s_id = s_i.id().clone();
                 let q_i = MenuItem::new(&menu_quit_text, true, None);
                 let q_id = q_i.id().clone();
-                let _ = menu.append_items(&[&q_i]);
+                let _ = menu.append_items(&[&s_i, &q_i]);
                 
-                // load_tray_icon now uses embedded Assets
                 let icon_res = load_tray_icon();
                 
                 if let Ok(icon) = TrayIconBuilder::new()
@@ -259,17 +261,26 @@ fn main() -> anyhow::Result<()> {
                     .build() {
                     
                     let m_c = tray_icon::menu::MenuEvent::receiver();
+                    let u_i_menu = ui_weak_tray.clone();
                     thread::spawn(move || {
-                        loop { if let Ok(e) = m_c.recv() { if e.id == q_id { std::process::exit(0); } } }
+                        loop { 
+                            if let Ok(e) = m_c.recv() { 
+                                if e.id == q_id { std::process::exit(0); }
+                                if e.id == s_id {
+                                    let ui_inner = u_i_menu.clone();
+                                    let _ = slint::invoke_from_event_loop(move || { if let Some(uw) = ui_inner.upgrade() { uw.window().show().unwrap(); } });
+                                }
+                            } 
+                        }
                     });
                     
                     let t_c = tray_icon::TrayIconEvent::receiver();
-                    let u_i = ui_weak_tray.clone();
+                    let u_i_click = ui_weak_tray.clone();
                     thread::spawn(move || {
                         loop {
                             if let Ok(e) = t_c.recv() {
-                                if let tray_icon::TrayIconEvent::Click { button: tray_icon::MouseButton::Left, .. } = e {
-                                    let ui_inner = u_i.clone();
+                                if let tray_icon::TrayIconEvent::Click { .. } = e {
+                                    let ui_inner = u_i_click.clone();
                                     let _ = slint::invoke_from_event_loop(move || { if let Some(uw) = ui_inner.upgrade() { uw.window().show().unwrap(); } });
                                 }
                             }
