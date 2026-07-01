@@ -218,6 +218,23 @@ fn main() -> anyhow::Result<()> {
     ui.set_l_diag_inactive(t.diag_inactive.into());
     #[cfg(target_os = "linux")] ui.set_status(t.status_ready.into());
     
+    // Proactive Diagnostic Check
+    {
+        let pactl_ok = Command::new("which").arg("pactl").status().map(|s| s.success()).unwrap_or(false);
+        let btctl_ok = Command::new("which").arg("bluetoothctl").status().map(|s| s.success()).unwrap_or(false);
+        let audio_svc_ok = Command::new("pactl").arg("info").status().map(|s| s.success()).unwrap_or(false);
+        let bt_svc_ok = Command::new("bluetoothctl").arg("show").output().map(|o| o.status.success() && !String::from_utf8_lossy(&o.stdout).contains("No default controller available")).unwrap_or(false);
+
+        if !pactl_ok || !btctl_ok || !audio_svc_ok || !bt_svc_ok {
+            append_log("Startup Check: Environmental issues detected. Showing diagnostics.");
+            ui.set_diag_pactl_status((if pactl_ok { t.diag_ok } else { t.diag_missing }).into());
+            ui.set_diag_btctl_status((if btctl_ok { t.diag_ok } else { t.diag_missing }).into());
+            ui.set_diag_audio_svc_status((if audio_svc_ok { t.diag_ok } else { t.diag_inactive }).into());
+            ui.set_diag_bt_svc_status((if bt_svc_ok { t.diag_ok } else { t.diag_inactive }).into());
+            ui.set_show_diag_results(true);
+        }
+    }
+
     // Check if installed
     let home = dirs::home_dir().unwrap_or_default();
     let desktop_file = home.join(".local").join("share").join("applications").join("audio-selector.desktop");
