@@ -30,7 +30,7 @@ use crate::i18n::get_current_translations;
 use crate::utils::{append_log, get_log_content, get_bluetooth_mac};
 
 fn install_app() -> anyhow::Result<()> {
-    append_log("Installing application...");
+    append_log("Installing/Updating application...");
     let cur = std::env::current_exe()?;
     let home = dirs::home_dir().context("No home directory found")?;
     
@@ -38,7 +38,11 @@ fn install_app() -> anyhow::Result<()> {
     let bin_dir = home.join(".local").join("bin");
     if !bin_dir.exists() { fs::create_dir_all(&bin_dir)?; }
     let target_bin = bin_dir.join("audio-selector");
-    append_log(&format!("Copying binary to {:?}", target_bin));
+    
+    append_log(&format!("Updating binary at {:?}", target_bin));
+    if target_bin.exists() {
+        let _ = fs::remove_file(&target_bin); // Try to remove first if it's running
+    }
     fs::copy(&cur, &target_bin)?;
     
     // 2. Create icon directory and export embedded icon
@@ -65,7 +69,7 @@ fn install_app() -> anyhow::Result<()> {
     if !autostart.exists() { fs::create_dir_all(&autostart)?; }
     fs::write(autostart.join("audio-selector.desktop"), format!("{}\nExec={} --tray", desktop_base, target_bin.to_string_lossy()))?;
     
-    append_log("Installation successful.");
+    append_log("Installation/Update successful.");
     Ok(())
 }
 
