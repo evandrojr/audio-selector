@@ -52,6 +52,16 @@ cargo run --release
 
 ## Development
 
+### Running the Watcher
+To monitor file changes and automatically rebuild/run during development, use the provided watcher script:
+
+```bash
+./run_watcher.sh
+```
+
+This runs the utility located at `src/bin/watcher.rs`.
+
+### Manual Build
 To build for all platforms using GitHub Actions, simply push to the `main` branch. The CI will generate binaries for Linux and Windows.
 
 ---
