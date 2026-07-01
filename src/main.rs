@@ -155,15 +155,19 @@ fn main() -> anyhow::Result<()> {
     
     // Prevent multiple instances if possible (simple file lock check)
     let lock_path = crate::utils::get_config_dir().join("app.lock");
+    let show_signal_path = crate::utils::get_config_dir().join("show.signal");
+    
     if let Ok(m) = fs::metadata(&lock_path) {
         if let Ok(age) = m.modified().map(|t| t.elapsed().unwrap_or_default()) {
-            if age.as_secs() < 5 {
-                append_log("Another instance might be running. Exiting to avoid hang.");
-                // return Ok(()); // Disabled for now, just logging
+            if age.as_secs() < 10 {
+                append_log("Another instance is running. Signaling to show window and exiting.");
+                let _ = fs::write(&show_signal_path, "show");
+                return Ok(());
             }
         }
     }
     let _ = fs::write(&lock_path, std::process::id().to_string());
+    let _ = fs::remove_file(&show_signal_path); // Clear any stale signal
 
     let config_data = load_config();
     let ui = AppWindow::new()?;
@@ -265,10 +269,22 @@ fn main() -> anyhow::Result<()> {
                     thread::spawn(move || {
                         loop { 
                             if let Ok(e) = m_c.recv() { 
-                                if e.id == q_id { std::process::exit(0); }
+                                append_log(&format!("Tray: Menu Event received ID: {:?}", e.id));
+                                if e.id == q_id { 
+                                    append_log("Tray: Quit clicked.");
+                                    std::process::exit(0); 
+                                }
                                 if e.id == s_id {
+                                    append_log("Tray: Show clicked.");
                                     let ui_inner = u_i_menu.clone();
-                                    let _ = slint::invoke_from_event_loop(move || { if let Some(uw) = ui_inner.upgrade() { uw.window().show().unwrap(); } });
+                                    let _ = slint::invoke_from_event_loop(move || { 
+                                        if let Some(uw) = ui_inner.upgrade() { 
+                                            append_log("Tray: Executing window.show()");
+                                            uw.window().show().expect("Failed to show window from tray menu"); 
+                                        } else {
+                                            append_log("Tray: UI Handle already dropped.");
+                                        }
+                                    });
                                 }
                             } 
                         }
@@ -279,9 +295,16 @@ fn main() -> anyhow::Result<()> {
                     thread::spawn(move || {
                         loop {
                             if let Ok(e) = t_c.recv() {
+                                append_log(&format!("Tray: Icon Event received: {:?}", e));
                                 if let tray_icon::TrayIconEvent::Click { .. } = e {
+                                    append_log("Tray: Left Click detected.");
                                     let ui_inner = u_i_click.clone();
-                                    let _ = slint::invoke_from_event_loop(move || { if let Some(uw) = ui_inner.upgrade() { uw.window().show().unwrap(); } });
+                                    let _ = slint::invoke_from_event_loop(move || { 
+                                        if let Some(uw) = ui_inner.upgrade() { 
+                                            append_log("Tray: Executing window.show() from click");
+                                            uw.window().show().expect("Failed to show window from tray click"); 
+                                        } 
+                                    });
                                 }
                             }
                         }
@@ -705,6 +728,24 @@ fn main() -> anyhow::Result<()> {
                         }
                     }
                 });
+            }
+        }
+    });
+
+    let ui_timer = ui.as_weak();
+    let lock_path_timer = lock_path.clone();
+    let show_signal_timer = show_signal_path.clone();
+    let timer = slint::Timer::default();
+    timer.start(slint::TimerMode::Repeated, std::time::Duration::from_secs(2), move || {
+        // Update lock file age
+        let _ = fs::write(&lock_path_timer, std::process::id().to_string());
+        
+        // Check for show signal
+        if show_signal_timer.exists() {
+            let _ = fs::remove_file(&show_signal_timer);
+            if let Some(u) = ui_timer.upgrade() {
+                append_log("Signal: Restore window request received.");
+                let _ = u.window().show();
             }
         }
     });
