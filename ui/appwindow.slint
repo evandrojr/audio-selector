@@ -374,13 +374,14 @@ export component AppWindow inherits Window {
         TouchArea { } 
         
         Rectangle {
-            width: 80%;
+            width: 350px;
+            height: diag_vbox.preferred-height;
             background: white;
             border-radius: 8px;
             border-width: 1px;
             border-color: #ccc;
             
-            VerticalBox {
+            diag_vbox := VerticalBox {
                 padding: 20px;
                 spacing: 15px;
                 
@@ -445,13 +446,14 @@ export component AppWindow inherits Window {
         TouchArea { } 
         
         Rectangle {
-            width: 80%;
+            width: 350px;
+            height: uninstall_vbox.preferred-height;
             background: white;
             border-radius: 8px;
             border-width: 1px;
             border-color: #ccc;
             
-            VerticalBox {
+            uninstall_vbox := VerticalBox {
                 padding: 20px;
                 spacing: 15px;
                 
@@ -491,16 +493,17 @@ export component AppWindow inherits Window {
 
     if show_install_prompt : Rectangle {
         background: #00000088;
-        TouchArea { } // Block interaction with background
+        TouchArea { } 
         
         Rectangle {
-            width: 80%;
+            width: 350px;
+            height: install_vbox.preferred-height;
             background: white;
             border-radius: 8px;
             border-width: 1px;
             border-color: #ccc;
             
-            VerticalBox {
+            install_vbox := VerticalBox {
                 padding: 20px;
                 spacing: 15px;
                 

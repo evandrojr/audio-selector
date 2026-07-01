@@ -339,8 +339,11 @@ fn main() -> anyhow::Result<()> {
                                     let ui_inner = u_i_menu.clone();
                                     let _ = slint::invoke_from_event_loop(move || { 
                                         if let Some(uw) = ui_inner.upgrade() { 
-                                            append_log("Tray: Executing window.show()");
-                                            uw.window().show().expect("Failed to show window from tray menu"); 
+                                            append_log("Tray: Executing window restoration sequence");
+                                            let _ = uw.window().show();
+                                            // Some DEs (like GNOME) might need a redundant show or focus poke
+                                            let _ = uw.window().set_maximized(false); // Poke window manager
+                                            let _ = uw.window().show();
                                         } else {
                                             append_log("Tray: UI Handle already dropped.");
                                         }
