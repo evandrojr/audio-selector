@@ -73,6 +73,33 @@ fn install_app() -> anyhow::Result<()> {
     Ok(())
 }
 
+fn uninstall_app() -> anyhow::Result<()> {
+    append_log("Uninstalling application...");
+    let home = dirs::home_dir().context("No home directory found")?;
+    
+    // 1. Remove binary
+    let target_bin = home.join(".local").join("bin").join("audio-selector");
+    if target_bin.exists() { let _ = fs::remove_file(target_bin); }
+    
+    // 2. Remove icon
+    let target_icon = home.join(".local").join("share").join("icons").join("hicolor").join("256x256").join("apps").join("audio-selector.png");
+    if target_icon.exists() { let _ = fs::remove_file(target_icon); }
+    
+    // 3. Remove Desktop and Autostart entries
+    let app_desktop = home.join(".local").join("share").join("applications").join("audio-selector.desktop");
+    if app_desktop.exists() { let _ = fs::remove_file(app_desktop); }
+    
+    let auto_desktop = home.join(".config").join("autostart").join("audio-selector.desktop");
+    if auto_desktop.exists() { let _ = fs::remove_file(auto_desktop); }
+    
+    // 4. Remove config and logs
+    let config_dir = home.join(".config").join("audio-selector");
+    if config_dir.exists() { let _ = fs::remove_dir_all(config_dir); }
+    
+    append_log("Uninstallation complete. Application will exit.");
+    std::process::exit(0);
+}
+
 fn load_tray_icon() -> tray_icon::Icon {
     // Load from embedded assets instead of filesystem path
     let icon_data = Assets::get("icon.png").expect("Icon not found in embedded assets");
@@ -220,6 +247,9 @@ fn main() -> anyhow::Result<()> {
     ui.set_l_diag_ok(t.diag_ok.into());
     ui.set_l_diag_missing(t.diag_missing.into());
     ui.set_l_diag_inactive(t.diag_inactive.into());
+    ui.set_l_uninstall(t.uninstall.into());
+    ui.set_l_uninstall_confirm(t.uninstall_confirm.into());
+    ui.set_l_uninstall_now(t.uninstall_now.into());
     #[cfg(target_os = "linux")] ui.set_status(t.status_ready.into());
     
     // Proactive Diagnostic Check
@@ -359,6 +389,10 @@ fn main() -> anyhow::Result<()> {
             log_ui.show().unwrap();
             Box::leak(Box::new(log_ui));
         }
+    });
+
+    ui.on_uninstall_app(move || {
+        let _ = uninstall_app();
     });
 
     ui.on_install_app(move || {

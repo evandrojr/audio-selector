@@ -38,6 +38,9 @@ pub struct Translations {
     pub diag_ok: &'static str,
     pub diag_missing: &'static str,
     pub diag_inactive: &'static str,
+    pub uninstall: &'static str,
+    pub uninstall_confirm: &'static str,
+    pub uninstall_now: &'static str,
 }
 
 pub const EN: Translations = Translations {
@@ -61,6 +64,9 @@ pub const EN: Translations = Translations {
     diag_ok: "OK",
     diag_missing: "MISSING",
     diag_inactive: "INACTIVE",
+    uninstall: "Uninstall Application",
+    uninstall_confirm: "Are you sure you want to uninstall Audio Selector? This will remove the shortcut, autostart, and configuration files.",
+    uninstall_now: "Uninstall Now",
 };
 
 pub const PT: Translations = Translations {
@@ -84,6 +90,9 @@ pub const PT: Translations = Translations {
     diag_ok: "OK",
     diag_missing: "FALTANDO",
     diag_inactive: "INATIVO",
+    uninstall: "Desinstalar Aplicação",
+    uninstall_confirm: "Tem certeza que deseja desinstalar o Seletor de Áudio? Isso removerá o atalho, o início automático e os arquivos de configuração.",
+    uninstall_now: "Desinstalar Agora",
 };
 
 pub const ES: Translations = Translations {
@@ -106,8 +115,12 @@ pub const ES: Translations = Translations {
     diag_service_bt: "Serviço Bluetooth (bluez)",
     diag_ok: "OK",
     diag_missing: "FALTANDO",
-    diag_inactive: "INATIVO",
+    diag_inactive: "INACTIVO",
+    uninstall: "Desinstalar aplicación",
+    uninstall_confirm: "¿Está seguro de que deseja desinstalar el Selector de Audio? Esto eliminará el acceso directo, el inicio automático y los archivos de configuración.",
+    uninstall_now: "Desinstalar ahora",
     };
+
 
 
 pub const FR: Translations = Translations {
@@ -130,8 +143,12 @@ pub const FR: Translations = Translations {
     diag_service_bt: "Service Bluetooth (bluez)",
     diag_ok: "OK",
     diag_missing: "MANQUANT",
-    diag_inactive: "INACTIF",
-};
+    diag_inactive: "INACTIVO",
+    uninstall: "Desinstalar aplicación",
+    uninstall_confirm: "¿Está seguro de que deseja desinstalar el Selector de Audio? Esto eliminará el acceso directo, el inicio automático y los archivos de configuración.",
+    uninstall_now: "Desinstalar ahora",
+    };
+
 
 pub const DE: Translations = Translations {
     title: "Audio-Selector", tab_devices: "Geräte", advanced_options: "Erweiterte Optionen",
@@ -153,8 +170,12 @@ pub const DE: Translations = Translations {
     diag_service_bt: "Bluetoothdienst (bluez)",
     diag_ok: "OK",
     diag_missing: "FEHLT",
-    diag_inactive: "INAKTIV",
-};
+    diag_inactive: "INACTIVO",
+    uninstall: "Desinstalar aplicación",
+    uninstall_confirm: "¿Está seguro de que deseja desinstalar el Selector de Audio? Esto eliminará el acceso directo, el inicio automático y los archivos de configuración.",
+    uninstall_now: "Desinstalar ahora",
+    };
+
 
 pub const IT: Translations = Translations {
     title: "Selettore Audio", tab_devices: "Dispositivi", advanced_options: "Opzioni Avanzate",
@@ -176,8 +197,12 @@ pub const IT: Translations = Translations {
     diag_service_bt: "Servizio Bluetooth (bluez)",
     diag_ok: "OK",
     diag_missing: "MANCANTE",
-    diag_inactive: "INATTIVO",
-};
+    diag_inactive: "INACTIVO",
+    uninstall: "Desinstalar aplicación",
+    uninstall_confirm: "¿Está seguro de que deseja desinstalar el Selector de Audio? Esto eliminará el acceso directo, el inicio automático y los archivos de configuración.",
+    uninstall_now: "Desinstalar ahora",
+    };
+
 
 pub fn get_current_translations() -> &'static Translations {
     let loc = get_locale().unwrap_or_else(|| "en".to_string());

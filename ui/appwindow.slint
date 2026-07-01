@@ -73,6 +73,7 @@ export component AppWindow inherits Window {
     callback sink_volume_changed(int);
     callback open_logs();
     callback run_diagnostics();
+    callback uninstall_app();
     callback install_app();
     callback open_url(string);
 
@@ -104,6 +105,9 @@ export component AppWindow inherits Window {
     in property <string> l_diag_btctl: "Bluetooth Tool (bluetoothctl)";
     in property <string> l_diag_audio_svc: "Audio Service (Pulse/PipeWire)";
     in property <string> l_diag_bt_svc: "Bluetooth Service (bluez)";
+    in property <string> l_uninstall: "Uninstall Application";
+    in property <string> l_uninstall_confirm: "Are you sure?";
+    in property <string> l_uninstall_now: "Uninstall Now";
     in property <string> l_diag_ok: "OK";
     in property <string> l_diag_missing: "MISSING";
     in property <string> l_diag_inactive: "INACTIVE";
@@ -114,6 +118,7 @@ export component AppWindow inherits Window {
     in property <string> status: "Ready";
     in property <bool> bluetooth_available: true;
     in-out property <bool> show_install_prompt: false;
+    in-out property <bool> show_uninstall_prompt: false;
     in-out property <bool> show_diag_results: false;
     in property <string> diag_pactl_status: "OK";
     in property <string> diag_btctl_status: "OK";
@@ -280,6 +285,10 @@ export component AppWindow inherits Window {
                                 text: l_open_logs;
                                 clicked => { open_logs(); }
                             }
+                            Button {
+                                text: l_uninstall;
+                                clicked => { show_uninstall_prompt = true; }
+                            }
                         }
                     }
                 }
@@ -426,6 +435,55 @@ export component AppWindow inherits Window {
                 Button {
                     text: "OK";
                     clicked => { show_diag_results = false; }
+                }
+            }
+        }
+    }
+
+    if show_uninstall_prompt : Rectangle {
+        background: #00000088;
+        TouchArea { } 
+        
+        Rectangle {
+            width: 80%;
+            background: white;
+            border-radius: 8px;
+            border-width: 1px;
+            border-color: #ccc;
+            
+            VerticalBox {
+                padding: 20px;
+                spacing: 15px;
+                
+                Text {
+                    text: l_uninstall;
+                    font-size: 18px;
+                    font-weight: 700;
+                    horizontal-alignment: center;
+                }
+                
+                Text {
+                    text: l_uninstall_confirm;
+                    wrap: word-wrap;
+                    horizontal-alignment: center;
+                }
+                
+                HorizontalBox {
+                    spacing: 15px;
+                    alignment: center;
+                    Button {
+                        text: l_uninstall_now;
+                        clicked => {
+                            show_uninstall_prompt = false;
+                            uninstall_app();
+                        }
+                    }
+                    Button {
+                        text: l_maybe_later;
+                        clicked => {
+                            show_uninstall_prompt = false;
+                        }
+                    }
                 }
             }
         }
