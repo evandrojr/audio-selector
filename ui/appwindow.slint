@@ -137,7 +137,7 @@ export component AppWindow inherits Window {
         spacing: 15px;
         padding: 10px;
 
-        TabWidget {
+        TabWidget { 
             Tab {
                 title: l_tab_devices;
                 ScrollView {
@@ -211,6 +211,16 @@ export component AppWindow inherits Window {
                                 selected => {
                                     source_changed(selected_source_index);
                                 }
+                            }
+                        }
+
+                        // Refresh button only in the devices tab
+                        HorizontalBox {
+                            alignment: center;
+                            padding-top: 10px;
+                            Button {
+                                text: l_refresh;
+                                clicked => { refresh(); }
                             }
                         }
                     }
@@ -357,14 +367,6 @@ export component AppWindow inherits Window {
                 vertical-alignment: center;
                 horizontal-alignment: center;
                 overflow: elide;
-            }
-        }
-
-        HorizontalBox {
-            alignment: center;
-            Button {
-                text: l_refresh;
-                clicked => { refresh(); }
             }
         }
     }
