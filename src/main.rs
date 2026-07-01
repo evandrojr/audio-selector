@@ -644,6 +644,8 @@ fn main() -> anyhow::Result<()> {
                     let sinks = s.lock().unwrap();
                     if (idx as usize) < sinks.len() {
                         let n = &sinks[idx as usize].name;
+                        // Only block if it's the connection proxy (bluez_connect.), 
+                        // allow actual sinks (bluez_sink, bluez_output, etc.)
                         if !n.starts_with("bluez_connect.") { let _ = set_sink_volume(n, v); }
                     }
                 });
