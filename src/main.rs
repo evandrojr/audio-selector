@@ -176,6 +176,29 @@ fn update_ui_models(ui: &AppWindow, sinks: &[PactlDevice], sources: &[PactlDevic
     }
 }
 
+fn restore_window(ui: &AppWindow) {
+    append_log("Restoration: Executing brute-force sequence...");
+    let w = ui.window();
+    
+    // 1. Slint show
+    let _ = w.show();
+    
+    // 2. Unminimize if needed
+    let _ = w.set_minimized(false);
+    
+    // 3. Poke window manager with a position refresh
+    let pos = w.position();
+    let _ = w.set_position(pos);
+    
+    // 4. Final show and focus
+    let _ = w.show();
+    
+    #[cfg(target_os = "linux")] {
+        // Try wmctrl as a last resort if it exists
+        let _ = Command::new("wmctrl").args(["-a", "Audio Selector"]).status();
+    }
+}
+
 fn main() -> anyhow::Result<()> {
     append_log(">>> APPLICATION STARTING");
     let args: Vec<String> = std::env::args().collect();
@@ -339,14 +362,8 @@ fn main() -> anyhow::Result<()> {
                                     let ui_inner = u_i_menu.clone();
                                     let _ = slint::invoke_from_event_loop(move || { 
                                         if let Some(uw) = ui_inner.upgrade() { 
-                                            append_log("Tray: Executing window restoration sequence");
-                                            let _ = uw.window().show();
-                                            // Some DEs (like GNOME) might need a redundant show or focus poke
-                                            let _ = uw.window().set_maximized(false); // Poke window manager
-                                            let _ = uw.window().show();
-                                        } else {
-                                            append_log("Tray: UI Handle already dropped.");
-                                        }
+                                            restore_window(&uw);
+                                        } 
                                     });
                                 }
                             } 
@@ -359,16 +376,12 @@ fn main() -> anyhow::Result<()> {
                         loop {
                             if let Ok(e) = t_c.recv() {
                                 append_log(&format!("Tray: Icon Event received: {:?}", e));
-                                if let tray_icon::TrayIconEvent::Click { .. } = e {
-                                    append_log("Tray: Left Click detected.");
-                                    let ui_inner = u_i_click.clone();
-                                    let _ = slint::invoke_from_event_loop(move || { 
-                                        if let Some(uw) = ui_inner.upgrade() { 
-                                            append_log("Tray: Executing window.show() from click");
-                                            uw.window().show().expect("Failed to show window from tray click"); 
-                                        } 
-                                    });
-                                }
+                                let ui_inner = u_i_click.clone();
+                                let _ = slint::invoke_from_event_loop(move || { 
+                                    if let Some(uw) = ui_inner.upgrade() { 
+                                        restore_window(&uw);
+                                    } 
+                                });
                             }
                         }
                     });
@@ -833,7 +846,7 @@ fn main() -> anyhow::Result<()> {
             let _ = fs::remove_file(&show_signal_timer);
             if let Some(u) = ui_timer.upgrade() {
                 append_log("Signal: Restore window request received.");
-                let _ = u.window().show();
+                restore_window(&u);
             }
         }
     });
