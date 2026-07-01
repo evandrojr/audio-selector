@@ -196,7 +196,21 @@ fn main() -> anyhow::Result<()> {
     ui.set_l_exclude_instruction(t.exclude_instruction.into());
     ui.set_l_volume(t.volume.into());
     ui.set_l_open_logs(t.open_logs.into());
+    ui.set_l_tab_about(t.tab_about.into());
+    ui.set_l_dev_info(t.dev_info.into());
+    ui.set_l_github(t.github.into());
+    ui.set_l_website(t.website.into());
+    ui.set_l_install_prompt(t.install_prompt.into());
+    ui.set_l_install_now(t.install_now.into());
+    ui.set_l_maybe_later(t.maybe_later.into());
     #[cfg(target_os = "linux")] ui.set_status(t.status_ready.into());
+    
+    // Check if installed
+    let home = dirs::home_dir().unwrap_or_default();
+    let desktop_file = home.join(".local").join("share").join("applications").join("audio-selector.desktop");
+    if !desktop_file.exists() && !args.iter().any(|x| x == "--tray") {
+        ui.set_show_install_prompt(true);
+    }
     
     let cfg_arc = Arc::new(Mutex::new(config_data.clone()));
     {
@@ -281,6 +295,14 @@ fn main() -> anyhow::Result<()> {
             log_ui.show().unwrap();
             Box::leak(Box::new(log_ui));
         }
+    });
+
+    ui.on_install_app(move || {
+        let _ = install_app();
+    });
+
+    ui.on_open_url(|url| {
+        let _ = Command::new("xdg-open").arg(url.as_str()).status();
     });
 
     let sinks_cache = Arc::new(Mutex::new(Vec::<PactlDevice>::new())); 

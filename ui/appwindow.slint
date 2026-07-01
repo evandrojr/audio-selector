@@ -72,11 +72,14 @@ export component AppWindow inherits Window {
     callback toggle_hide_unknown_bt(bool);
     callback sink_volume_changed(int);
     callback open_logs();
+    callback install_app();
+    callback open_url(string);
 
     // Localization properties
     in property <string> l_title: "Audio Selector";
     in property <string> l_tab_devices: "Devices";
     in property <string> l_advanced_options: "Advanced Options";
+    in property <string> l_tab_about: "About";
     in property <string> l_hide_unknown_bt: "Hide unknown Bluetooth devices (MACs)";
     in property <string> l_bluetooth: "Bluetooth";
     in property <string> l_unified: "Use same device for input/output";
@@ -88,12 +91,19 @@ export component AppWindow inherits Window {
     in property <string> l_exclude_instruction: "Check devices below to hide them from the main list:";
     in property <string> l_volume: "Volume";
     in property <string> l_open_logs: "Open Application Logs";
+    in property <string> l_dev_info: "Developer: @S932743005";
+    in property <string> l_github: "GitHub";
+    in property <string> l_website: "Website";
+    in property <string> l_install_prompt: "Would you like to install?";
+    in property <string> l_install_now: "Install Now";
+    in property <string> l_maybe_later: "Maybe Later";
 
     in property <[string]> sink_names: [];
     in property <[string]> source_names: [];
     in property <[DeviceToggle]> all_devices: [];
     in property <string> status: "Ready";
     in property <bool> bluetooth_available: true;
+    in-out property <bool> show_install_prompt: false;
     
     in-out property <int> selected_sink_index: -1;
     in-out property <int> selected_source_index: -1;
@@ -254,6 +264,56 @@ export component AppWindow inherits Window {
                     }
                 }
             }
+
+            Tab {
+                title: l_tab_about;
+                VerticalBox {
+                    spacing: 20px;
+                    padding: 20px;
+                    alignment: center;
+                    
+                    Image {
+                        source: @image-url("assets/icon.png");
+                        width: 100px;
+                        height: 100px;
+                    }
+                    
+                    Text {
+                        text: l_title;
+                        font-size: 20px;
+                        font-weight: 700;
+                        horizontal-alignment: center;
+                    }
+                    
+                    Text {
+                        text: "v1.9.2";
+                        font-size: 14px;
+                        color: #666;
+                        horizontal-alignment: center;
+                    }
+                    
+                    Text {
+                        text: l_dev_info;
+                        font-size: 14px;
+                        horizontal-alignment: center;
+                    }
+                    
+                    HorizontalBox {
+                        alignment: center;
+                        spacing: 15px;
+                        Button {
+                            text: l_github;
+                            clicked => { open_url("https://github.com/evandrojr/audio-selector"); }
+                        }
+                        Button {
+                            text: l_website;
+                            clicked => { open_url("https://evandrojr.github.io/audio-selector/"); }
+                        }
+                    }
+                    
+                    Rectangle { vertical-stretch: 1; }
+                }
+            }
         }
 
         // Status Area
@@ -276,6 +336,56 @@ export component AppWindow inherits Window {
             Button {
                 text: l_refresh;
                 clicked => { refresh(); }
+            }
+        }
+    }
+
+    if show_install_prompt : Rectangle {
+        background: #00000088;
+        TouchArea { } // Block interaction with background
+        
+        Rectangle {
+            width: 80%;
+            background: white;
+            border-radius: 8px;
+            border-width: 1px;
+            border-color: #ccc;
+            
+            VerticalBox {
+                padding: 20px;
+                spacing: 15px;
+                
+                Text {
+                    text: l_title;
+                    font-size: 18px;
+                    font-weight: 700;
+                    horizontal-alignment: center;
+                }
+                
+                Text {
+                    text: l_install_prompt;
+                    wrap: word-wrap;
+                    horizontal-alignment: center;
+                }
+                
+                HorizontalBox {
+                    spacing: 15px;
+                    alignment: center;
+                    Button {
+                        text: l_install_now;
+                        primary: true;
+                        clicked => {
+                            show_install_prompt = false;
+                            install_app();
+                        }
+                    }
+                    Button {
+                        text: l_maybe_later;
+                        clicked => {
+                            show_install_prompt = false;
+                        }
+                    }
+                }
             }
         }
     }
